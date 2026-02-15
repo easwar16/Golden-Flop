@@ -1,0 +1,4 @@
+# Exclude Bun lockfiles so EAS uses npm (package-lock.json) for Install dependencies.
+# Bun + monorepo has known issues on EAS; npm install at root works.
+bun.lock
+bun.lockb
