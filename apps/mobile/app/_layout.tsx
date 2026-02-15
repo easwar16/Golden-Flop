@@ -1,3 +1,6 @@
+// NativeWind/Tailwind – disabled temporarily to fix Metro TransformError; re-enable after app loads
+// import '../global.css';
+
 // Polyfills for @solana/web3.js (must be first)
 import 'react-native-get-random-values';
 import { Platform } from 'react-native';
@@ -8,13 +11,15 @@ import { Buffer } from 'buffer';
 if (Platform.OS !== 'web') {
   setupURLPolyfill();
 }
-// @ts-expect-error - Buffer global for Solana
 global.Buffer = Buffer;
 
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+
+SplashScreen.preventAutoHideAsync();
 
 import { GameProvider } from '@/contexts/game-context';
 import { WalletProvider } from '@/contexts/wallet-context';
@@ -33,10 +38,10 @@ export default function RootLayout() {
         <GameProvider>
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="table/[id]" options={{ title: 'Table', headerShown: true }} />
+            <Stack.Screen name="table/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
           </Stack>
-          <StatusBar style="auto" />
+          <StatusBar style="light" />
         </GameProvider>
       </WalletProvider>
     </ThemeProvider>

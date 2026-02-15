@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import type { CardValue } from '@/constants/poker';
@@ -8,12 +8,36 @@ import { RED_SUITS } from '@/constants/poker';
 interface PokerCardProps {
   card: CardValue | null;
   faceDown?: boolean;
+  /** When set, use this image asset (from card-assets); avoids loading 53 assets until table screen. */
+  imageSource?: number;
   onPressIn?: () => void;
   onPressOut?: () => void;
   style?: object;
 }
 
-export function PokerCard({ card, faceDown = false, onPressIn, onPressOut, style }: PokerCardProps) {
+export function PokerCard({
+  card,
+  faceDown = false,
+  imageSource,
+  onPressIn,
+  onPressOut,
+  style,
+}: PokerCardProps) {
+  if (imageSource != null) {
+    return (
+      <Pressable
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={[styles.card, style]}>
+        <Image
+          source={imageSource}
+          style={styles.image}
+          resizeMode="contain"
+        />
+      </Pressable>
+    );
+  }
+
   if (faceDown || !card) {
     return (
       <Pressable
@@ -39,8 +63,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 80,
     borderRadius: 8,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#333',
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -55,6 +80,10 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.3)',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
   },
   rank: {
     fontSize: 20,

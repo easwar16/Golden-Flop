@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 
@@ -74,18 +74,30 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.5)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 1, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
   fold: {
-    backgroundColor: '#555',
+    backgroundColor: '#c62828',
   },
   call: {
-    backgroundColor: '#0a7ea4',
+    backgroundColor: '#1565c0',
   },
   raise: {
     backgroundColor: '#2e7d32',
   },
   allIn: {
-    backgroundColor: '#c62828',
+    backgroundColor: '#6a1b9a',
   },
   pressed: {
     opacity: 0.85,
