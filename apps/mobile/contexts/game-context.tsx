@@ -1,5 +1,5 @@
 import type { CardValue } from '@/constants/poker';
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 
 type TableInfo = {
   id: string;
@@ -75,6 +75,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [tables, setTables] = useState<TableInfo[]>(MOCK_TABLES);
   const [currentTable, setCurrentTable] = useState<TableInfo | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
+  const nextTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const createTable = useCallback(
     (smallBlind: number, bigBlind: number, minBuyIn: number, maxBuyIn: number): TableInfo => {
@@ -120,6 +121,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [tables]);
 
   const leaveTable = useCallback(() => {
+    if (nextTurnTimeoutRef.current) {
+      clearTimeout(nextTurnTimeoutRef.current);
+      nextTurnTimeoutRef.current = null;
+    }
     setCurrentTable(null);
     setGame(null);
   }, []);
@@ -154,6 +159,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const performAction = useCallback(
     (action: 'fold' | 'call' | 'raise' | 'all-in', amount?: number) => {
+      if (nextTurnTimeoutRef.current) {
+        clearTimeout(nextTurnTimeoutRef.current);
+        nextTurnTimeoutRef.current = null;
+      }
       setGame((g) => {
         if (!g) return null;
         if (action === 'fold') {
@@ -171,6 +180,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           isYourTurn: false,
         };
       });
+      // Mock: give turn back after 1.5s so you can test buttons again
+      nextTurnTimeoutRef.current = setTimeout(() => {
+        nextTurnTimeoutRef.current = null;
+        setGame((g) => (g ? { ...g, isYourTurn: true } : null));
+      }, 1500);
     },
     []
   );

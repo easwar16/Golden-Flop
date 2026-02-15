@@ -166,6 +166,9 @@ export default function TableScreen() {
   const tableState = useTableState(id, game, currentTable);
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
   const [sliderValue, setSliderValue] = useState(1);
+  const [foldPressed, setFoldPressed] = useState(false);
+  const [callPressed, setCallPressed] = useState(false);
+  const [raisePressed, setRaisePressed] = useState(false);
   const onLayoutRoot = useCallback(async () => {
     if (fontsLoaded || fontError) await SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
@@ -176,7 +179,12 @@ export default function TableScreen() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } catch (_) {}
     }
-  }, [game?.isYourTurn]);
+    if (!tableState?.isMyTurn) {
+      setFoldPressed(false);
+      setCallPressed(false);
+      setRaisePressed(false);
+    }
+  }, [game?.isYourTurn, tableState?.isMyTurn]);
 
   if (!tableState) {
     return (
@@ -367,32 +375,69 @@ export default function TableScreen() {
           </View>
         </View>
 
-        {/* Action buttons: FOLD (custom bg image), CALL, RAISE */}
+        {/* Action buttons: FOLD (image bg), CALL, RAISE only (reference) */}
         <View style={styles.actionBar}>
           <Pressable
-            style={({ pressed }) => [styles.actionBtn, styles.foldBtn, pressed && styles.actionBtnPressed]}
-            onPress={() => handleAction('fold')}
+            style={({ pressed }) => [styles.actionBtn, styles.foldBtnWrap, pressed && styles.actionBtnPressed]}
+            onPressIn={() => setFoldPressed(true)}
+            onPressOut={() => setFoldPressed(false)}
+            onPress={() => {
+              setFoldPressed(false);
+              handleAction('fold');
+            }}
             disabled={!tableState.isMyTurn}>
             <ImageBackground
-              source={require('@/assets/images/fold-button-bg.png')}
+              source={
+                foldPressed
+                  ? require('@/assets/images/buttons/fold-btn-pressed.png')
+                  : require('@/assets/images/buttons/fold-btn.png')
+              }
               style={styles.foldBtnBg}
               resizeMode="stretch">
               <Text style={styles.actionBtnText}>FOLD</Text>
             </ImageBackground>
           </Pressable>
           <Pressable
-            style={({ pressed }) => [styles.actionBtn, styles.callBtn, pressed && styles.actionBtnPressed]}
-            onPress={() => handleAction('call', tableState.currentBet)}
+            style={({ pressed }) => [styles.actionBtn, styles.callBtnWrap, pressed && styles.actionBtnPressed]}
+            onPressIn={() => setCallPressed(true)}
+            onPressOut={() => setCallPressed(false)}
+            onPress={() => {
+              setCallPressed(false);
+              handleAction('call', tableState.currentBet);
+            }}
             disabled={!tableState.isMyTurn}>
-            <Text style={styles.actionBtnText}>
-              CALL {tableState.currentBet > 0 ? tableState.currentBet : '—'}
-            </Text>
+            <ImageBackground
+              source={
+                callPressed
+                  ? require('@/assets/images/buttons/call-btn-pressed.png')
+                  : require('@/assets/images/buttons/call-btn.png')
+              }
+              style={styles.foldBtnBg}
+              resizeMode="stretch">
+              <Text style={styles.actionBtnText}>
+                CALL {tableState.currentBet > 0 ? tableState.currentBet : '—'}
+              </Text>
+            </ImageBackground>
           </Pressable>
           <Pressable
-            style={({ pressed }) => [styles.actionBtn, styles.raiseBtn, pressed && styles.actionBtnPressed]}
-            onPress={() => handleAction('raise', SLIDER_OPTIONS[sliderValue])}
+            style={({ pressed }) => [styles.actionBtn, styles.raiseBtnWrap, pressed && styles.actionBtnPressed]}
+            onPressIn={() => setRaisePressed(true)}
+            onPressOut={() => setRaisePressed(false)}
+            onPress={() => {
+              setRaisePressed(false);
+              handleAction('raise', SLIDER_OPTIONS[sliderValue]);
+            }}
             disabled={!tableState.isMyTurn}>
-            <Text style={styles.actionBtnText}>RAISE</Text>
+            <ImageBackground
+              source={
+                raisePressed
+                  ? require('@/assets/images/buttons/raise-btn-pressed.png')
+                  : require('@/assets/images/buttons/raise-btn.png')
+              }
+              style={styles.foldBtnBg}
+              resizeMode="stretch">
+              <Text style={styles.actionBtnText}>RAISE</Text>
+            </ImageBackground>
           </Pressable>
         </View>
       </View>
@@ -594,6 +639,7 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
@@ -612,17 +658,14 @@ const styles = StyleSheet.create({
     }),
   },
   actionBtnPressed: { opacity: 0.85 },
-  foldBtn: { overflow: 'hidden' },
+  foldBtnWrap: { overflow: 'hidden' },
+  callBtnWrap: { overflow: 'hidden' },
+  raiseBtnWrap: { overflow: 'hidden' },
   foldBtnBg: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 10,
   },
-  callBtn: { backgroundColor: '#1565c0' },
-  raiseBtn: { backgroundColor: '#2e7d32' },
   actionBtnText: {
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 10 : 9,
