@@ -78,6 +78,11 @@ const tableGreenDark = '#0d3d2e';
 const tableBorderDark = '#1a0a2e';
 const SLIDER_OPTIONS = [10000, 15000, 20000];
 
+/** Seat layout: 6 seats at equal angles on table edge. Index → angle (deg): 0=240°, 1=300°, 2=0°, 3=60°, 4=120°, 5=180°. */
+const SEAT_ANGLES_DEG = [240, 300, 0, 60, 120, 180];
+const SEAT_BOX_WIDTH = 72;
+const SEAT_BOX_HEIGHT = 68;
+
 // Build table state from game context (replace with WebSocket subscription later)
 function useTableState(
   tableId: string | undefined,
@@ -169,6 +174,14 @@ export default function TableScreen() {
   const [foldPressed, setFoldPressed] = useState(false);
   const [callPressed, setCallPressed] = useState(false);
   const [raisePressed, setRaisePressed] = useState(false);
+  const [tableLayout, setTableLayout] = useState<{ w: number; h: number } | null>(null);
+  const onTableLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+      const { width, height } = e.nativeEvent.layout;
+      if (width > 0 && height > 0) setTableLayout({ w: width, h: height });
+    },
+    []
+  );
   const onLayoutRoot = useCallback(async () => {
     if (fontsLoaded || fontError) await SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
@@ -218,6 +231,30 @@ export default function TableScreen() {
   const myHand = tableState.myHand;
   const myHandRevealed = tableState.myHandRevealed;
 
+  const seatPositions = useMemo(() => {
+    if (!tableLayout) return null;
+    const { w, h } = tableLayout;
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = Math.min(w, h) * 0.38;
+    const meBoxWidth = 140;
+    const meBoxHeight = 72;
+    return SEAT_ANGLES_DEG.map((deg, i) => {
+      const rad = (deg * Math.PI) / 180;
+      const x = cx + r * Math.cos(rad);
+      const y = cy + r * Math.sin(rad);
+      const isMe = i === 4;
+      const bw = isMe ? meBoxWidth : SEAT_BOX_WIDTH;
+      const bh = isMe ? meBoxHeight : SEAT_BOX_HEIGHT;
+      return {
+        left: x - bw / 2,
+        top: y - bh / 2,
+        width: bw,
+        height: bh,
+      };
+    });
+  }, [tableLayout]);
+
   return (
     <View style={styles.container} onLayout={onLayoutRoot}>
       <ImageBackground
@@ -252,108 +289,83 @@ export default function TableScreen() {
           </View>
         </View>
 
-        {/* Table area: 6 seats equally spaced around oval table */}
-        <View style={styles.tableArea}>
-          {/* Row 1: top-left (0), top-right (1) */}
-          <View style={styles.tableRow1}>
-            <View style={styles.seatSlot}>
-              <SeatView
-                seat={s0}
-                chipsLabel={s0 ? formatChips(s0.chips) : '—'}
-                dealerLabel={s0?.isDealer ?? false}
-              />
-            </View>
-            <View style={styles.seatSlot}>
-              <SeatView
-                seat={s1}
-                chipsLabel={s1 ? formatChips(s1.chips) : '—'}
-                dealerLabel={s1?.isDealer ?? false}
-              />
-            </View>
-          </View>
-
-          {/* Row 2: left (5) | oval table | right (2) */}
-          <View style={styles.tableRow2}>
-            <View style={styles.seatSlot}>
-              <SeatView
-                seat={s5}
-                chipsLabel={s5 ? formatChips(s5.chips) : '—'}
-                dealerLabel={s5?.isDealer ?? false}
-              />
-            </View>
-            <View style={styles.ovalTableWrap}>
-              <View style={styles.ovalTableGlow}>
-                <View style={styles.ovalTableInner}>
-                  <View style={styles.ovalTableFelt}>
-                    <Text style={styles.communityLabel}>COMMUNITY CARDS</Text>
-                    <View style={styles.communityCards}>
-                      {[0, 1, 2, 3, 4].map((i) => {
-                        const card = communityCards[i];
-                        return (
-                          <View key={i} style={styles.communitySlot}>
-                            {card ? (
-                              <PokerCard card={card} style={styles.communityCardSize} />
-                            ) : (
-                              <View style={styles.emptyCardOutline} />
-                            )}
-                          </View>
-                        );
-                      })}
-                    </View>
+        {/* Table area: oval centered, 6 seats on the edge at equal angles */}
+        <View style={styles.tableArea} onLayout={onTableLayout}>
+          <View style={styles.tableCenterWrap}>
+            <View style={styles.ovalTableGlow}>
+              <View style={styles.ovalTableInner}>
+                <View style={styles.ovalTableFelt}>
+                  <Text style={styles.communityLabel}>COMMUNITY CARDS</Text>
+                  <View style={styles.communityCards}>
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const card = communityCards[i];
+                      return (
+                        <View key={i} style={styles.communitySlot}>
+                          {card ? (
+                            <PokerCard card={card} style={styles.communityCardSize} />
+                          ) : (
+                            <View style={styles.emptyCardOutline} />
+                          )}
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
               </View>
             </View>
-            <View style={styles.seatSlot}>
-              <SeatView
-                seat={s2}
-                chipsLabel={s2 ? formatChips(s2.chips) : '—'}
-                dealerLabel={s2?.isDealer ?? false}
-              />
-            </View>
           </View>
-
-          {/* Row 3: bottom-left = me (4), bottom-right (3) */}
-          <View style={styles.tableRow3}>
-            <View style={styles.seatSlot}>
-              <View style={styles.myHandRow}>
-                <View style={styles.myCardsWrap}>
-                  <Pressable
-                    onPressIn={() => requestPeek(0)}
-                    onPressOut={releasePeek}
-                    style={styles.holeCardWrap}>
-                    <PokerCard
-                      card={myHand[0]}
-                      faceDown={!myHandRevealed[0]}
-                      onPressIn={() => requestPeek(0)}
-                      onPressOut={releasePeek}
-                    />
-                  </Pressable>
-                  <Pressable
-                    onPressIn={() => requestPeek(1)}
-                    onPressOut={releasePeek}
-                    style={styles.holeCardWrap}>
-                    <PokerCard
-                      card={myHand[1]}
-                      faceDown={!myHandRevealed[1]}
-                      onPressIn={() => requestPeek(1)}
-                      onPressOut={releasePeek}
-                    />
-                  </Pressable>
-                </View>
-                <View style={styles.myChipsWrap}>
-                  <ChipStack amount={tableState.myChips} />
-                </View>
+          {seatPositions &&
+            [s0, s1, s2, s3, s4, s5].map((seat, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.seatSlotOnEdge,
+                  {
+                    left: seatPositions[i].left,
+                    top: seatPositions[i].top,
+                    width: seatPositions[i].width,
+                    height: seatPositions[i].height,
+                  },
+                ]}>
+                {i === 4 ? (
+                  <View style={styles.myHandRow}>
+                    <View style={styles.myCardsWrap}>
+                      <Pressable
+                        onPressIn={() => requestPeek(0)}
+                        onPressOut={releasePeek}
+                        style={styles.holeCardWrap}>
+                        <PokerCard
+                          card={myHand[0]}
+                          faceDown={!myHandRevealed[0]}
+                          onPressIn={() => requestPeek(0)}
+                          onPressOut={releasePeek}
+                        />
+                      </Pressable>
+                      <Pressable
+                        onPressIn={() => requestPeek(1)}
+                        onPressOut={releasePeek}
+                        style={styles.holeCardWrap}>
+                        <PokerCard
+                          card={myHand[1]}
+                          faceDown={!myHandRevealed[1]}
+                          onPressIn={() => requestPeek(1)}
+                          onPressOut={releasePeek}
+                        />
+                      </Pressable>
+                    </View>
+                    <View style={styles.myChipsWrap}>
+                      <ChipStack amount={tableState.myChips} />
+                    </View>
+                  </View>
+                ) : (
+                  <SeatView
+                    seat={seat}
+                    chipsLabel={seat ? formatChips(seat.chips) : '—'}
+                    dealerLabel={seat?.isDealer ?? false}
+                  />
+                )}
               </View>
-            </View>
-            <View style={styles.seatSlot}>
-              <SeatView
-                seat={s3}
-                chipsLabel={s3 ? formatChips(s3.chips) : '—'}
-                dealerLabel={s3?.isDealer ?? false}
-              />
-            </View>
-          </View>
+            ))}
         </View>
 
         {/* Pot */}
@@ -520,37 +532,18 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 200,
     marginBottom: 8,
+    position: 'relative',
   },
-  tableRow1: {
-    flexDirection: 'row',
-    marginBottom: 6,
-    gap: 8,
-  },
-  tableRow2: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    minHeight: 100,
-    gap: 6,
-  },
-  tableRow3: {
-    flexDirection: 'row',
-    marginTop: 6,
-    gap: 8,
-  },
-  /** Equal-width slot for each of the 6 seats around the table */
-  seatSlot: {
-    flex: 1,
+  tableCenterWrap: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    minWidth: 0,
   },
-  ovalTableWrap: {
-    flex: 2,
+  /** Seats on the table edge, positioned by layout */
+  seatSlotOnEdge: {
+    position: 'absolute',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4,
-    minWidth: 0,
   },
   ovalTableGlow: {
     padding: 4,

@@ -13,17 +13,57 @@ if (Platform.OS !== 'web') {
 }
 global.Buffer = Buffer;
 
+import { Ionicons } from '@expo/vector-icons';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
+import { LinkPreviewContextProvider } from 'expo-router/build/link/preview/LinkPreviewContext';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 SplashScreen.preventAutoHideAsync();
 
 import { GameProvider } from '@/contexts/game-context';
+import { MusicProvider, useMusic } from '@/contexts/music-context';
 import { WalletProvider } from '@/contexts/wallet-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+const gold = '#FFD700';
+const neonCyan = '#00FFFF';
+
+function GlobalMusicButton() {
+  const insets = useSafeAreaInsets();
+  const music = useMusic();
+  const isPlaying = music?.isPlaying ?? false;
+  const audioReady = music?.audioReady ?? false;
+  const togglePlayPause = music?.togglePlayPause ?? (() => {});
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[styles.musicButtonWrap, { top: insets.top + 8 }]}
+    >
+      <Pressable
+        onPress={togglePlayPause}
+        style={({ pressed }) => [
+          styles.musicButton,
+          pressed && styles.musicButtonPressed,
+          !audioReady && styles.musicButtonDisabled,
+        ]}
+        accessibilityLabel={audioReady ? (isPlaying ? 'Pause music' : 'Play music') : 'Music unavailable'}
+        accessibilityRole="button"
+      >
+        <Ionicons
+          name={isPlaying && audioReady ? 'musical-notes' : 'musical-notes-outline'}
+          size={24}
+          color={gold}
+        />
+      </Pressable>
+    </View>
+  );
+}
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -36,14 +76,52 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <WalletProvider>
         <GameProvider>
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="table/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-          </Stack>
-          <StatusBar style="light" />
+          <MusicProvider>
+            <LinkPreviewContextProvider>
+              <View style={styles.root}>
+                <Stack>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="table/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+                </Stack>
+                <GlobalMusicButton />
+              </View>
+              <StatusBar style="light" />
+            </LinkPreviewContextProvider>
+          </MusicProvider>
         </GameProvider>
       </WalletProvider>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+  musicButtonWrap: {
+    position: 'absolute',
+    right: 16,
+    left: 0,
+    zIndex: 9999,
+    alignItems: 'flex-end',
+    pointerEvents: 'box-none',
+    ...(Platform.OS === 'android' ? { elevation: 9999 } : {}),
+  },
+  musicButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(81, 46, 123, 0.9)',
+    borderWidth: 2,
+    borderColor: neonCyan,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  musicButtonPressed: {
+    opacity: 0.85,
+  },
+  musicButtonDisabled: {
+    opacity: 0.7,
+  },
+});

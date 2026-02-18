@@ -55,6 +55,7 @@ export default function LobbyScreen() {
   const [bigBlind, setBigBlind] = useState('20');
   const [minBuyIn, setMinBuyIn] = useState('200');
   const [maxBuyIn, setMaxBuyIn] = useState('2000');
+  const [pressedJoinTableId, setPressedJoinTableId] = useState<string | null>(null);
 
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
   const onLayoutRootView = useCallback(async () => {
@@ -144,9 +145,23 @@ export default function LobbyScreen() {
                 <Text style={styles.tableDetail}>Min buy-in: {(t.minBuyIn / 100).toFixed(0)} SOL</Text>
               </View>
               <Pressable
-                style={({ pressed }) => [styles.joinBtn, pressed && styles.joinBtnPressed]}
-                onPress={() => handleJoin(t.id)}>
-                <Text style={styles.joinBtnText}>JOIN</Text>
+                style={({ pressed }) => [styles.joinBtn, styles.joinBtnWrap, pressed && styles.joinBtnPressed]}
+                onPressIn={() => setPressedJoinTableId(t.id)}
+                onPressOut={() => setPressedJoinTableId(null)}
+                onPress={() => {
+                  setPressedJoinTableId(null);
+                  handleJoin(t.id);
+                }}>
+                <ImageBackground
+                  source={
+                    pressedJoinTableId === t.id
+                      ? require('@/assets/images/buttons/join-btn-pressed.png')
+                      : require('@/assets/images/buttons/join-btn.png')
+                  }
+                  style={styles.joinBtnBg}
+                  resizeMode="stretch">
+                  <Text style={styles.joinBtnText}>JOIN</Text>
+                </ImageBackground>
               </Pressable>
             </View>
           ))}
@@ -379,11 +394,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(34, 197, 94, 0.9)',
   },
   joinBtn: {
-    backgroundColor: gold,
     paddingVertical: 10,
     paddingHorizontal: 20,
+    minHeight: 44,
+    minWidth: 88,
     borderRadius: 12,
     marginLeft: 12,
+    overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowColor: 'rgba(0,0,0,0.4)',
@@ -394,6 +411,12 @@ const styles = StyleSheet.create({
       android: { elevation: 4 },
       default: {},
     }),
+  },
+  joinBtnWrap: { overflow: 'hidden' },
+  joinBtnBg: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   joinBtnPressed: { opacity: 0.88 },
   joinBtnText: {

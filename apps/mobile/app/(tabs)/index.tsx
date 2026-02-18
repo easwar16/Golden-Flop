@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [hoveredBtn, setHoveredBtn] = useState<'play' | 'private' | 'leaderboard' | null>(null);
+  const [playPressed, setPlayPressed] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
     PressStart2P_400Regular,
@@ -63,7 +64,7 @@ export default function HomeScreen() {
         {/* Menu buttons – wrapper View handles hover on web via mouse events */}
         <View style={styles.buttons}>
           <View
-            style={styles.btnWrapper}
+            style={[styles.btnWrapper, styles.playBtnWrapper]}
             {...({
               onMouseEnter: () => setHoveredBtn('play'),
               onMouseLeave: () => setHoveredBtn(null),
@@ -73,17 +74,31 @@ export default function HomeScreen() {
                 style={({ pressed }) => [
                   styles.btn,
                   styles.btnPlay,
+                  styles.playBtnWrap,
                   hoveredBtn === 'play' && styles.btnHover,
                   pressed && styles.btnPressed,
-                ]}>
-                <View style={[styles.btnInner, styles.btnInnerPlay]}>
-                  <Text style={[styles.btnText, styles.btnTextPlay]}>PLAY</Text>
+                ]}
+                onPressIn={() => setPlayPressed(true)}
+                onPressOut={() => setPlayPressed(false)}>
+                <View style={styles.playBtnClip}>
+                  <ImageBackground
+                    source={
+                      playPressed
+                        ? require('@/assets/images/buttons/play-btn-pressed.png')
+                        : require('@/assets/images/buttons/play-btn.png')
+                    }
+                    style={styles.playBtnBg}
+                    resizeMode="stretch">
+                    <View style={styles.playBtnTextWrap}>
+                      <Text style={[styles.btnText, styles.btnTextPlay]}>PLAY</Text>
+                    </View>
+                  </ImageBackground>
                 </View>
               </Pressable>
             </Link>
           </View>
           <View
-            style={styles.btnWrapper}
+            style={[styles.btnWrapper, styles.otherBtnWrapper]}
             {...({
               onMouseEnter: () => setHoveredBtn('private'),
               onMouseLeave: () => setHoveredBtn(null),
@@ -100,7 +115,7 @@ export default function HomeScreen() {
             </Pressable>
           </View>
           <View
-            style={styles.btnWrapper}
+            style={[styles.btnWrapper, styles.otherBtnWrapper]}
             {...({
               onMouseEnter: () => setHoveredBtn('leaderboard'),
               onMouseLeave: () => setHoveredBtn(null),
@@ -165,13 +180,24 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 320,
     gap: 16,
-    alignItems: 'stretch',
+    alignItems: 'center',
     marginTop: 180,
     marginBottom: 32,
     paddingTop: 8,
   },
   btnWrapper: {
     width: '100%',
+  },
+  playBtnWrapper: {
+    width: '100%',
+    minHeight: 104,
+    marginTop: 12,
+    marginBottom: -8,
+  },
+  otherBtnWrapper: {
+    width: '100%',
+    maxWidth: 260,
+    alignSelf: 'center',
   },
   btn: {
     width: '100%',
@@ -207,9 +233,10 @@ const styles = StyleSheet.create({
     }),
   },
   btnPlay: {
-    minHeight: 68,
+    minHeight: 88,
+    borderRadius: 44,
     borderWidth: 2,
-    backgroundColor: btnBg,
+    backgroundColor: 'transparent',
     borderTopColor: gold,
     borderBottomColor: btnBorderGlowBottom,
     borderLeftColor: neonCyan,
@@ -260,17 +287,27 @@ const styles = StyleSheet.create({
   btnPressed: {
     opacity: 0.88,
   },
-  btnInnerPlay: {
-    paddingVertical: 22,
-    paddingHorizontal: 48,
-    minHeight: 56,
-    backgroundColor: btnBg,
-    borderWidth: 2,
-    borderTopColor: gold,
-    borderBottomColor: 'rgba(255, 215, 0, 0.5)',
-    borderLeftColor: 'rgba(255, 215, 0, 0.7)',
-    borderRightColor: 'rgba(255, 215, 0, 0.7)',
-    borderRadius: 24,
+  playBtnWrap: {
+    overflow: 'hidden',
+  },
+  playBtnClip: {
+    flex: 1,
+    width: '100%',
+    minHeight: 88,
+    borderRadius: 42,
+    overflow: 'hidden',
+  },
+  playBtnBg: {
+    width: '100%',
+    height: '100%',
+    minHeight: 88,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playBtnTextWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   btnInner: {
     borderWidth: 2,
@@ -292,6 +329,7 @@ const styles = StyleSheet.create({
     fontSize: Platform.OS === 'web' ? 15 : 13,
     color: gold,
     letterSpacing: 1,
+    textAlign: 'center',
     ...Platform.select({
       ios: {
         textShadowColor: neonPink,
@@ -313,6 +351,7 @@ const styles = StyleSheet.create({
   btnTextPlay: {
     fontSize: Platform.OS === 'web' ? 17 : 15,
     letterSpacing: 2,
+    textAlign: 'center',
     ...Platform.select({
       ios: {
         textShadowColor: gold,

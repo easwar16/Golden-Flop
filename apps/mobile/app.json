@@ -15,7 +15,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.goldenflop.skr.goldenflop"
     },
     "android": {
       "adaptiveIcon": {
@@ -54,7 +55,8 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
