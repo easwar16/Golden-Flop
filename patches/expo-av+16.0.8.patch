@@ -1,0 +1,51 @@
+diff --git a/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java b/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
+index 964af5d..bb8a91b 100644
+--- a/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
++++ b/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
+@@ -13,6 +13,8 @@ import android.media.MediaRecorder;
+ import android.net.Uri;
+ import android.os.Build;
+ import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
+ import android.os.SystemClock;
+ import android.util.Log;
+ 
+@@ -267,18 +269,27 @@ public class AVManager implements LifecycleEventListener, AudioManager.OnAudioFo
+       mIsRegistered = false;
+     }
+ 
+-    // remove all remaining sounds
+-    Iterator<PlayerData> iter = mSoundMap.values().iterator();
+-    while (iter.hasNext()) {
+-      final PlayerData data = iter.next();
+-      iter.remove();
+-      if (data != null) {
+-        data.release();
++    // ExoPlayer must be released on the main thread. When called from New Architecture
++    // TurboModule teardown this may arrive on a pool thread, so we dispatch to main.
++    final List<PlayerData> playersToRelease = new ArrayList<>(mSoundMap.values());
++    mSoundMap.clear();
++    final Set<VideoView> videosToRelease = new HashSet<>(mVideoViewSet);
++
++    Runnable releaseOnMain = () -> {
++      for (final PlayerData data : playersToRelease) {
++        if (data != null) {
++          try { data.release(); } catch (Exception ignored) {}
++        }
+       }
+-    }
++      for (final VideoView videoView : videosToRelease) {
++        try { videoView.unloadPlayerAndMediaController(); } catch (Exception ignored) {}
++      }
++    };
+ 
+-    for (final VideoView videoView : mVideoViewSet) {
+-      videoView.unloadPlayerAndMediaController();
++    if (Looper.myLooper() == Looper.getMainLooper()) {
++      releaseOnMain.run();
++    } else {
++      new Handler(Looper.getMainLooper()).post(releaseOnMain);
+     }
+ 
+     removeAudioRecorder();

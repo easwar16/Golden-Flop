@@ -36,3 +36,7 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Bun lockfiles — use npm (package-lock.json) so EAS Build and expo-doctor are consistent
+bun.lock
+bun.lockb
