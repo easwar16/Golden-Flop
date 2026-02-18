@@ -1,10 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { NativeModules } from 'react-native';
-import { Asset } from 'expo-asset';
 
 const BACKGROUND_MUSIC = require('../assets/music/funoro-youx27re-gonna-like-it-here-469728.mp3');
 const VOLUME = 0.15;
-const TRACK_ID = 'background-music';
 
 type MusicContextValue = {
   isPlaying: boolean;
@@ -15,36 +13,23 @@ type MusicContextValue = {
 const MusicContext = createContext<MusicContextValue | null>(null);
 
 export function useMusic() {
-  const ctx = useContext(MusicContext);
-  return ctx;
+  return useContext(MusicContext);
 }
 
 function MusicProviderInner({ children }: { children: React.ReactNode }) {
   const [audioReady, setAudioReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const trackPlayerRef = useRef<typeof import('react-native-track-player') | null>(null);
-  const expoSoundRef = useRef<{ play: () => Promise<void>; pause: () => Promise<void> } | null>(null);
+  const playerRef = useRef<{ play: () => void; pause: () => void; cleanup?: () => void } | null>(null);
 
-  const togglePlayPause = useCallback(async () => {
-    if (!audioReady) return;
+  const togglePlayPause = useCallback(() => {
+    if (!audioReady || !playerRef.current) return;
     try {
-      if (expoSoundRef.current) {
-        if (isPlaying) {
-          await expoSoundRef.current.pause();
-          setIsPlaying(false);
-        } else {
-          await expoSoundRef.current.play();
-          setIsPlaying(true);
-        }
-      } else if (trackPlayerRef.current) {
-        const TrackPlayer = trackPlayerRef.current.default;
-        if (isPlaying) {
-          await TrackPlayer.pause();
-          setIsPlaying(false);
-        } else {
-          await TrackPlayer.play();
-          setIsPlaying(true);
-        }
+      if (isPlaying) {
+        playerRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        playerRef.current.play();
+        setIsPlaying(true);
       }
     } catch {
       // ignore
@@ -53,53 +38,37 @@ function MusicProviderInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const timeoutId = setTimeout(() => {
-      setupAndPlay().catch(() => {});
-    }, 600);
 
-    async function setupWithTrackPlayer() {
-      const rntp = require('react-native-track-player');
-      trackPlayerRef.current = rntp;
-      const { default: TrackPlayer, Capability, RepeatMode } = rntp;
-      if (!TrackPlayer) throw new Error('TrackPlayer not available');
-
-      const { PlaybackService } = require('../services/PlaybackService');
-      TrackPlayer.registerPlaybackService(() => PlaybackService);
-
-      await TrackPlayer.setupPlayer({});
-      if (cancelled) return;
-      await TrackPlayer.updateOptions({
-        capabilities: [Capability.Play, Capability.Pause, Capability.Stop],
-        compactCapabilities: [Capability.Play, Capability.Pause],
+    async function setupWithExpoAudio() {
+      const { createAudioPlayer, setAudioModeAsync } = require('expo-audio');
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'doNotMix',
       });
       if (cancelled) return;
 
-      const asset = Asset.fromModule(BACKGROUND_MUSIC);
-      await asset.downloadAsync();
-      if (cancelled) return;
-      const trackUrl = asset.localUri ?? asset.uri;
-      if (!trackUrl) throw new Error('Could not resolve music asset URI');
+      const player = createAudioPlayer(BACKGROUND_MUSIC);
+      player.loop = true;
+      player.volume = VOLUME;
 
-      await TrackPlayer.add({
-        id: TRACK_ID,
-        url: trackUrl,
-        title: 'Background',
-        artist: '',
-      });
-      if (cancelled) return;
-      await TrackPlayer.setRepeatMode(RepeatMode.Track);
-      await TrackPlayer.setVolume(VOLUME);
-      if (!cancelled) {
-        setAudioReady(true);
-        await new Promise((r) => setTimeout(r, 150));
-        if (!cancelled) await TrackPlayer.play();
-        if (!cancelled) setIsPlaying(true);
+      if (cancelled) {
+        player.remove();
+        return;
       }
+
+      playerRef.current = {
+        play: () => player.play(),
+        pause: () => player.pause(),
+        cleanup: () => player.remove(),
+      };
+      setAudioReady(true);
+      player.play();
+      if (!cancelled) setIsPlaying(true);
     }
 
     async function setupWithExpoAV() {
       const { Audio } = require('expo-av');
-      if (!Audio?.Sound) throw new Error('expo-av not available');
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
@@ -107,6 +76,7 @@ function MusicProviderInner({ children }: { children: React.ReactNode }) {
         playThroughEarpieceAndroid: false,
       });
       if (cancelled) return;
+
       const { sound } = await Audio.Sound.createAsync(BACKGROUND_MUSIC, {
         isLooping: true,
         volume: VOLUME,
@@ -115,56 +85,51 @@ function MusicProviderInner({ children }: { children: React.ReactNode }) {
         await sound.unloadAsync();
         return;
       }
-      await sound.setVolumeAsync(VOLUME);
-      expoSoundRef.current = {
+
+      playerRef.current = {
         play: () => sound.playAsync(),
         pause: () => sound.pauseAsync(),
+        cleanup: () => sound.unloadAsync(),
       };
       setAudioReady(true);
       await sound.playAsync();
-      setIsPlaying(true);
+      if (!cancelled) setIsPlaying(true);
     }
 
-    async function setupAndPlay() {
-      // Try TrackPlayer first (Android primary), fall back to expo-av.
-      // The NativeModules property access itself can throw on RN 0.81+ TurboModule interop,
-      // so the entire TrackPlayer attempt must be wrapped in try-catch.
-      try {
-        const hasTrackPlayer = !!NativeModules?.TrackPlayerModule;
-        if (hasTrackPlayer) {
-          await setupWithTrackPlayer();
+    async function setup() {
+      // expo-audio is only available after a rebuild that includes it.
+      // Check for the native module before attempting to use it, to avoid
+      // expo-modules-core throwing an uncaught global error.
+      const hasExpoAudio = !!NativeModules?.ExpoAudio;
+      if (hasExpoAudio) {
+        try {
+          await setupWithExpoAudio();
           return;
+        } catch {
+          // fall through to expo-av
         }
-      } catch (err) {
-        console.warn('[MusicProvider] TrackPlayer failed, falling back to expo-av:', err);
-        trackPlayerRef.current = null;
       }
-
-      // Fallback: expo-av (works on iOS, Android, and web)
       try {
         await setupWithExpoAV();
       } catch (err) {
-        console.warn('[MusicProvider] expo-av setup failed:', err);
-        if (!cancelled) {
-          setAudioReady(false);
-          expoSoundRef.current = null;
-        }
+        console.warn('[MusicProvider] All audio setup failed:', err);
       }
     }
+
+    const timeoutId = setTimeout(() => setup().catch(() => {}), 600);
 
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
+      playerRef.current?.cleanup?.();
     };
   }, []);
 
-  const value: MusicContextValue = {
-    isPlaying,
-    audioReady,
-    togglePlayPause,
-  };
-
-  return <MusicContext.Provider value={value}>{children}</MusicContext.Provider>;
+  return (
+    <MusicContext.Provider value={{ isPlaying, audioReady, togglePlayPause }}>
+      {children}
+    </MusicContext.Provider>
+  );
 }
 
 export function MusicProvider({ children }: { children: React.ReactNode }) {

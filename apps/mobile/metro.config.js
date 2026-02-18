@@ -7,6 +7,15 @@ const { getDefaultConfig } = require('expo/metro-config');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
+const monorepoRoot = path.resolve(__dirname, '../..');
+
+// Explicitly map packages that Metro 0.83+ struggles to resolve via exports
+// when they only have a `main` field (no `exports` field in package.json)
+config.resolver.extraNodeModules = {
+  ...config.resolver.extraNodeModules,
+  'stacktrace-parser': path.resolve(monorepoRoot, 'node_modules/stacktrace-parser'),
+};
+
 // Resolve @/ to this app root (apps/mobile)
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName.startsWith('@/')) {

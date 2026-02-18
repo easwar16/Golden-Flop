@@ -13,15 +13,17 @@ if (Platform.OS !== 'web') {
 }
 global.Buffer = Buffer;
 
-import { Ionicons } from '@expo/vector-icons';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { LinkPreviewContextProvider } from 'expo-router/build/link/preview/LinkPreviewContext';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const musicOffImage = require('../assets/images/music-button-off.png');
+const musicOnImage = require('../assets/images/music-button-on.png');
 
 SplashScreen.preventAutoHideAsync();
 
@@ -30,8 +32,6 @@ import { MusicProvider, useMusic } from '@/contexts/music-context';
 import { WalletProvider } from '@/contexts/wallet-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-const gold = '#FFD700';
-const neonCyan = '#00FFFF';
 
 function GlobalMusicButton() {
   const insets = useSafeAreaInsets();
@@ -48,17 +48,15 @@ function GlobalMusicButton() {
       <Pressable
         onPress={togglePlayPause}
         style={({ pressed }) => [
-          styles.musicButton,
           pressed && styles.musicButtonPressed,
           !audioReady && styles.musicButtonDisabled,
         ]}
         accessibilityLabel={audioReady ? (isPlaying ? 'Pause music' : 'Play music') : 'Music unavailable'}
         accessibilityRole="button"
       >
-        <Ionicons
-          name={isPlaying && audioReady ? 'musical-notes' : 'musical-notes-outline'}
-          size={24}
-          color={gold}
+        <Image
+          source={isPlaying && audioReady ? musicOnImage : musicOffImage}
+          style={[styles.musicButtonImage, !audioReady && styles.musicButtonDisabled]}
         />
       </Pressable>
     </View>
@@ -108,15 +106,10 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
     ...(Platform.OS === 'android' ? { elevation: 9999 } : {}),
   },
-  musicButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(81, 46, 123, 0.9)',
-    borderWidth: 2,
-    borderColor: neonCyan,
-    alignItems: 'center',
-    justifyContent: 'center',
+  musicButtonImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   musicButtonPressed: {
     opacity: 0.85,
