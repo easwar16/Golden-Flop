@@ -12,20 +12,22 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Image,
   ImageBackground,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ChipStack } from '@/components/poker/chip-stack';
 import { PokerCard } from '@/components/poker/poker-card';
 import type { CardValue } from '@/constants/poker';
 import { useGame } from '@/contexts/game-context';
-import { useTactilePeek } from '@/hooks/use-tactile-peek';
 
 // --- WebSocket-ready types (fill from WebSocket server later) ---
 export type TableSeat = {
@@ -58,30 +60,144 @@ export type TableViewState = {
   dealerSeatIndex: number;
 };
 
-/** Seat index for current user (we show cards here, not a profile card). */
-const MY_SEAT_INDEX = 4;
-
-function formatChips(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
-
 function formatBalanceLong(n: number): string {
   return n.toLocaleString();
 }
 
 const gold = '#FFD700';
-const neonPurple = '#e879f9';
-const tableGreen = '#1b5e20';
 const tableGreenDark = '#0d3d2e';
-const tableBorderDark = '#1a0a2e';
-const SLIDER_OPTIONS = [10000, 15000, 20000];
 
-/** Seat layout: 6 seats at equal angles on table edge. Index → angle (deg): 0=240°, 1=300°, 2=0°, 3=60°, 4=120°, 5=180°. */
-const SEAT_ANGLES_DEG = [240, 300, 0, 60, 120, 180];
-const SEAT_BOX_WIDTH = 72;
-const SEAT_BOX_HEIGHT = 68;
+// ── Raise amount input ───────────────────────────────────────────────────────
+function RaiseAmountInput({
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [inputText, setInputText] = useState(String(value));
+
+  useEffect(() => {
+    setInputText(String(value));
+  }, [value]);
+
+  const handleCommit = useCallback(() => {
+    const raw = inputText.replace(/\D/g, '');
+    const parsed = parseInt(raw, 10);
+    if (raw.length > 0 && !isNaN(parsed)) {
+      const clamped = Math.max(min, Math.min(max, parsed));
+      const rounded = Math.round(clamped / 100) * 100;
+      onChange(rounded);
+      setInputText(String(rounded));
+    } else {
+      setInputText(String(value));
+    }
+  }, [inputText, value, min, max, onChange]);
+
+  const currentValue = (() => {
+    const raw = inputText.replace(/\D/g, '');
+    const parsed = parseInt(raw, 10);
+    return raw.length > 0 && !isNaN(parsed) ? parsed : value;
+  })();
+
+  const handleDecrement = useCallback(() => {
+    const next = Math.round((Math.max(min, currentValue - 100)) / 100) * 100;
+    onChange(next);
+    setInputText(String(next));
+  }, [currentValue, min, onChange]);
+
+  const handleIncrement = useCallback(() => {
+    const next = Math.round((Math.min(max, currentValue + 100)) / 100) * 100;
+    onChange(next);
+    setInputText(String(next));
+  }, [currentValue, max, onChange]);
+
+  return (
+    <View style={rsStyles.container}>
+      <View style={rsStyles.inputRow}>
+        <Pressable
+          style={({ pressed }) => [rsStyles.stepperBtn, pressed && rsStyles.stepperBtnPressed]}
+          onPress={handleDecrement}
+          hitSlop={8}>
+          <Text style={rsStyles.stepperBtnText}>−</Text>
+        </Pressable>
+        <TextInput
+          style={rsStyles.valueInput}
+          value={inputText}
+          onChangeText={(t) => setInputText(t.replace(/\D/g, ''))}
+          onBlur={handleCommit}
+          onSubmitEditing={handleCommit}
+          keyboardType="number-pad"
+          selectTextOnFocus
+          showSoftInputOnFocus
+        />
+        <Pressable
+          style={({ pressed }) => [rsStyles.stepperBtn, pressed && rsStyles.stepperBtnPressed]}
+          onPress={handleIncrement}
+          hitSlop={8}>
+          <Text style={rsStyles.stepperBtnText}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const rsStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    // alignSelf: 'stretch',
+    backgroundColor: 'rgba(8, 8, 28, 0.88)',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: gold,
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: gold,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.4,
+        shadowRadius: 6,
+      },
+      android: { elevation: 6 },
+      default: {},
+    }),
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  valueInput: {
+    flex: 1,
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: Platform.OS === 'web' ? 11 : 10,
+    color: gold,
+    textAlign: 'center',
+    paddingVertical: 2,
+  },
+  stepperBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 215, 0, 0.25)',
+    borderWidth: 1,
+    borderColor: gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnPressed: { opacity: 0.7 },
+  stepperBtnText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: Platform.OS === 'web' ? 10 : 9,
+    color: gold,
+  },
+});
 
 // Build table state from game context (replace with WebSocket subscription later)
 function useTableState(
@@ -115,73 +231,16 @@ function useTableState(
   }, [tableId, game, currentTable]);
 }
 
-// Empty seat placeholder avatar
-function EmptyAvatar() {
-  return (
-    <View style={styles.emptyAvatar}>
-      <Text style={styles.emptyAvatarText}>?</Text>
-    </View>
-  );
-}
-
-// Single seat display (top/left/right); bottom is "me" and rendered separately
-function SeatView({
-  seat,
-  chipsLabel,
-  dealerLabel,
-}: {
-  seat: TableSeat;
-  chipsLabel: string;
-  dealerLabel: boolean;
-}) {
-  return (
-    <View style={styles.seatContainer}>
-      {seat ? (
-        <View style={[styles.seatAvatar, { backgroundColor: '#2e7d32' }]} />
-      ) : (
-        <EmptyAvatar />
-      )}
-      <View style={styles.seatBanner}>
-        <Text style={styles.seatName} numberOfLines={1}>
-          {seat?.name ?? '—'}
-        </Text>
-        <Text style={styles.seatChips}>{chipsLabel}</Text>
-      </View>
-      {dealerLabel && (
-        <View style={styles.dealerBtn}>
-          <Text style={styles.dealerBtnText}>DEALER</Text>
-        </View>
-      )}
-      <View style={styles.chipStackSmall}>
-        <View style={[styles.chipDot, { backgroundColor: '#c62828' }]} />
-        <View style={[styles.chipDot, { backgroundColor: '#7b1fa2' }]} />
-        <View style={[styles.chipDot, { backgroundColor: '#2e7d32' }]} />
-      </View>
-    </View>
-  );
-}
 
 export default function TableScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { game, currentTable, leaveTable, performAction, peekHoleCard, stopPeek } = useGame();
-  const { requestPeek, releasePeek } = useTactilePeek();
+  const { game, currentTable, leaveTable, performAction } = useGame();
 
   const tableState = useTableState(id, game, currentTable);
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
-  const [sliderValue, setSliderValue] = useState(1);
-  const [foldPressed, setFoldPressed] = useState(false);
-  const [callPressed, setCallPressed] = useState(false);
-  const [raisePressed, setRaisePressed] = useState(false);
-  const [tableLayout, setTableLayout] = useState<{ w: number; h: number } | null>(null);
-  const onTableLayout = useCallback(
-    (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
-      const { width, height } = e.nativeEvent.layout;
-      if (width > 0 && height > 0) setTableLayout({ w: width, h: height });
-    },
-    []
-  );
+  const [raiseAmount, setRaiseAmount] = useState(1000);
   const onLayoutRoot = useCallback(async () => {
     if (fontsLoaded || fontError) await SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
@@ -192,18 +251,13 @@ export default function TableScreen() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } catch (_) {}
     }
-    if (!tableState?.isMyTurn) {
-      setFoldPressed(false);
-      setCallPressed(false);
-      setRaisePressed(false);
-    }
-  }, [game?.isYourTurn, tableState?.isMyTurn]);
+  }, [game?.isYourTurn]);
 
   if (!tableState) {
     return (
       <View style={styles.container}>
         <ImageBackground
-          source={require('@/assets/images/table-bg.png')}
+          source={require('@/assets/images/table-room-bg.png')}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />
@@ -220,51 +274,81 @@ export default function TableScreen() {
     try {
       if (tableState.isMyTurn) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (_) {}
-    const raiseAmount = action === 'raise' ? (amount ?? SLIDER_OPTIONS[sliderValue]) : amount;
-    performAction(action, raiseAmount);
+    const raiseAmt = action === 'raise' ? (amount ?? raiseAmount) : amount;
+    performAction(action, raiseAmt);
   };
 
   const roomId = (id?.length ?? 0) > 8 ? `${id!.slice(0, 6)}…${id!.slice(-2)}` : id ?? '—';
 
-  const [s0, s1, s2, s3, s4, s5] = tableState.seats;
   const communityCards = tableState.communityCards;
-  const myHand = tableState.myHand;
-  const myHandRevealed = tableState.myHandRevealed;
-
-  const seatPositions = useMemo(() => {
-    if (!tableLayout) return null;
-    const { w, h } = tableLayout;
-    const cx = w / 2;
-    const cy = h / 2;
-    const r = Math.min(w, h) * 0.38;
-    const meBoxWidth = 140;
-    const meBoxHeight = 72;
-    return SEAT_ANGLES_DEG.map((deg, i) => {
-      const rad = (deg * Math.PI) / 180;
-      const x = cx + r * Math.cos(rad);
-      const y = cy + r * Math.sin(rad);
-      const isMe = i === 4;
-      const bw = isMe ? meBoxWidth : SEAT_BOX_WIDTH;
-      const bh = isMe ? meBoxHeight : SEAT_BOX_HEIGHT;
-      return {
-        left: x - bw / 2,
-        top: y - bh / 2,
-        width: bw,
-        height: bh,
-      };
-    });
-  }, [tableLayout]);
+  const raiseMin = Math.max(tableState.currentBet > 0 ? tableState.currentBet * 2 : 100, 100);
+  const raiseMax = Math.max(tableState.myChips, raiseMin + 100);
 
   return (
     <View style={styles.container} onLayout={onLayoutRoot}>
       <ImageBackground
-        source={require('@/assets/images/table-bg.png')}
+        source={require('@/assets/images/table-room-bg.png')}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       />
 
-      <View style={[styles.content, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 12 }]}>
-        {/* Top bar: Balance | Wi-Fi | Room */}
+      {/* Table image — precisely sized and positioned */}
+      <View style={styles.tableArea}>
+        <Image
+          source={require('@/assets/images/table.png')}
+          style={styles.tableImage}
+          resizeMode="stretch"
+        />
+
+        {/* Community cards — centered on the oval */}
+        <View style={styles.communityOverlay}>
+          <View style={styles.communityCardsWrap}>
+            <View style={styles.communityCards}>
+            {[0, 1, 2, 3, 4].map((i) => {
+              const card = communityCards[i];
+              return (
+                <View key={i} style={styles.communitySlot}>
+                  {card ? (
+                    <PokerCard card={card} style={styles.communityCardSize} />
+                  ) : (
+                    <View style={styles.emptyCardOutline} />
+                  )}
+                </View>
+              );
+            })}
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Tap table/top area to dismiss keyboard — does not cover bottom controls so input can receive touches */}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            { bottom: 220, zIndex: 1 },
+          ]}
+          collapsable={false}
+        />
+      </TouchableWithoutFeedback>
+
+      {/* Join room icon — top center of table, below balance bar */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.joinRoomIcon,
+          { top: insets.top + 44 },
+          pressed && styles.joinRoomIconPressed,
+        ]}
+        onPress={() => {/* TODO: join room action */}}>
+        <Image
+          source={require('@/assets/images/join-room-icon.png')}
+          style={styles.joinRoomIconImage}
+          resizeMode="cover"
+        />
+      </Pressable>
+
+      {/* Top bar floats over table */}
+      <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
         <View style={styles.topBar}>
           <View style={styles.balanceRow}>
             <Text style={styles.coinIcon}>🪙</Text>
@@ -288,168 +372,76 @@ export default function TableScreen() {
             </Pressable>
           </View>
         </View>
+      </View>
 
-        {/* Table area: oval centered, 6 seats on the edge at equal angles */}
-        <View style={styles.tableArea} onLayout={onTableLayout}>
-          <View style={styles.tableCenterWrap}>
-            <View style={styles.ovalTableGlow}>
-              <View style={styles.ovalTableInner}>
-                <View style={styles.ovalTableFelt}>
-                  <Text style={styles.communityLabel}>COMMUNITY CARDS</Text>
-                  <View style={styles.communityCards}>
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const card = communityCards[i];
-                      return (
-                        <View key={i} style={styles.communitySlot}>
-                          {card ? (
-                            <PokerCard card={card} style={styles.communityCardSize} />
-                          ) : (
-                            <View style={styles.emptyCardOutline} />
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              </View>
-            </View>
-          </View>
-          {seatPositions &&
-            [s0, s1, s2, s3, s4, s5].map((seat, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.seatSlotOnEdge,
-                  {
-                    left: seatPositions[i].left,
-                    top: seatPositions[i].top,
-                    width: seatPositions[i].width,
-                    height: seatPositions[i].height,
-                  },
-                ]}>
-                {i === 4 ? (
-                  <View style={styles.myHandRow}>
-                    <View style={styles.myCardsWrap}>
-                      <Pressable
-                        onPressIn={() => requestPeek(0)}
-                        onPressOut={releasePeek}
-                        style={styles.holeCardWrap}>
-                        <PokerCard
-                          card={myHand[0]}
-                          faceDown={!myHandRevealed[0]}
-                          onPressIn={() => requestPeek(0)}
-                          onPressOut={releasePeek}
-                        />
-                      </Pressable>
-                      <Pressable
-                        onPressIn={() => requestPeek(1)}
-                        onPressOut={releasePeek}
-                        style={styles.holeCardWrap}>
-                        <PokerCard
-                          card={myHand[1]}
-                          faceDown={!myHandRevealed[1]}
-                          onPressIn={() => requestPeek(1)}
-                          onPressOut={releasePeek}
-                        />
-                      </Pressable>
-                    </View>
-                    <View style={styles.myChipsWrap}>
-                      <ChipStack amount={tableState.myChips} />
-                    </View>
-                  </View>
-                ) : (
-                  <SeatView
-                    seat={seat}
-                    chipsLabel={seat ? formatChips(seat.chips) : '—'}
-                    dealerLabel={seat?.isDealer ?? false}
-                  />
-                )}
-              </View>
-            ))}
-        </View>
-
-        {/* Pot */}
-        <View style={styles.potRow}>
-          <ChipStack amount={tableState.pot} label="Pot" />
-        </View>
-
-        {/* Bet slider: 10K, 15K, 20K */}
-        <View style={styles.sliderSection}>
-          <View style={styles.sliderTrack}>
-            {SLIDER_OPTIONS.map((val, i) => (
-              <Pressable
-                key={val}
-                style={[styles.sliderSegment, i === sliderValue && styles.sliderSegmentActive]}
-                onPress={() => setSliderValue(i)}>
-                <Text style={styles.sliderLabel}>{val >= 1000 ? `${val / 1000}K` : val}</Text>
-              </Pressable>
-            ))}
+      {/* Bottom controls float over the table */}
+      <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
+        {/* Raise amount input — expands to the left */}
+        <View style={styles.raiseSliderRow}>
+          <View style={styles.raiseAmountInputWrap}>
+            <RaiseAmountInput
+              min={raiseMin}
+              max={raiseMax}
+              value={Math.max(raiseMin, Math.min(raiseMax, raiseAmount))}
+              onChange={setRaiseAmount}
+            />
           </View>
         </View>
 
-        {/* Action buttons: FOLD (image bg), CALL, RAISE only (reference) */}
+        {/* Action buttons: FOLD, CALL, RAISE */}
         <View style={styles.actionBar}>
           <Pressable
             style={({ pressed }) => [styles.actionBtn, styles.foldBtnWrap, pressed && styles.actionBtnPressed]}
-            onPressIn={() => setFoldPressed(true)}
-            onPressOut={() => setFoldPressed(false)}
-            onPress={() => {
-              setFoldPressed(false);
-              handleAction('fold');
-            }}
+            onPress={() => handleAction('fold')}
             disabled={!tableState.isMyTurn}>
-            <ImageBackground
-              source={
-                foldPressed
-                  ? require('@/assets/images/buttons/fold-btn-pressed.png')
-                  : require('@/assets/images/buttons/fold-btn.png')
-              }
-              style={styles.foldBtnBg}
-              resizeMode="stretch">
-              <Text style={styles.actionBtnText}>FOLD</Text>
-            </ImageBackground>
+            {({ pressed }) => (
+              <ImageBackground
+                source={
+                  pressed
+                    ? require('@/assets/images/buttons/fold-btn-pressed.png')
+                    : require('@/assets/images/buttons/fold-btn.png')
+                }
+                style={styles.foldBtnBg}
+                resizeMode="stretch">
+                <Text style={styles.actionBtnText}>FOLD</Text>
+              </ImageBackground>
+            )}
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.actionBtn, styles.callBtnWrap, pressed && styles.actionBtnPressed]}
-            onPressIn={() => setCallPressed(true)}
-            onPressOut={() => setCallPressed(false)}
-            onPress={() => {
-              setCallPressed(false);
-              handleAction('call', tableState.currentBet);
-            }}
+            onPress={() => handleAction('call', tableState.currentBet)}
             disabled={!tableState.isMyTurn}>
-            <ImageBackground
-              source={
-                callPressed
-                  ? require('@/assets/images/buttons/call-btn-pressed.png')
-                  : require('@/assets/images/buttons/call-btn.png')
-              }
-              style={styles.foldBtnBg}
-              resizeMode="stretch">
-              <Text style={styles.actionBtnText}>
-                CALL {tableState.currentBet > 0 ? tableState.currentBet : '—'}
-              </Text>
-            </ImageBackground>
+            {({ pressed }) => (
+              <ImageBackground
+                source={
+                  pressed
+                    ? require('@/assets/images/buttons/call-btn-pressed.png')
+                    : require('@/assets/images/buttons/call-btn.png')
+                }
+                style={styles.foldBtnBg}
+                resizeMode="stretch">
+                <Text style={styles.actionBtnText}>
+                  CALL {tableState.currentBet > 0 ? tableState.currentBet : '—'}
+                </Text>
+              </ImageBackground>
+            )}
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.actionBtn, styles.raiseBtnWrap, pressed && styles.actionBtnPressed]}
-            onPressIn={() => setRaisePressed(true)}
-            onPressOut={() => setRaisePressed(false)}
-            onPress={() => {
-              setRaisePressed(false);
-              handleAction('raise', SLIDER_OPTIONS[sliderValue]);
-            }}
+            onPress={() => handleAction('raise', raiseAmount)}
             disabled={!tableState.isMyTurn}>
-            <ImageBackground
-              source={
-                raisePressed
-                  ? require('@/assets/images/buttons/raise-btn-pressed.png')
-                  : require('@/assets/images/buttons/raise-btn.png')
-              }
-              style={styles.foldBtnBg}
-              resizeMode="stretch">
-              <Text style={styles.actionBtnText}>RAISE</Text>
-            </ImageBackground>
+            {({ pressed }) => (
+              <ImageBackground
+                source={
+                  pressed
+                    ? require('@/assets/images/buttons/raise-btn-pressed.png')
+                    : require('@/assets/images/buttons/raise-btn.png')
+                }
+                style={styles.foldBtnBg}
+                resizeMode="stretch">
+                <Text style={styles.actionBtnText}>RAISE</Text>
+              </ImageBackground>
+            )}
           </Pressable>
         </View>
       </View>
@@ -465,14 +457,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: { color: gold, fontSize: 14 },
-  content: {
-    flex: 1,
-    paddingHorizontal: 12,
+  topBarWrap: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 10,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
     paddingVertical: 6,
     paddingHorizontal: 10,
     backgroundColor: 'rgba(26, 10, 46, 0.9)',
@@ -529,53 +522,43 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   tableArea: {
-    flex: 1,
-    minHeight: 200,
-    marginBottom: 8,
-    position: 'relative',
-  },
-  tableCenterWrap: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
+    top: -50,
+    bottom: 16,
   },
-  /** Seats on the table edge, positioned by layout */
-  seatSlotOnEdge: {
+  tableImage: {
+    width: '110%',
+    height: '100%',
+    marginLeft: '-5%',
+  },
+  joinRoomIcon: {
     position: 'absolute',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ovalTableGlow: {
-    padding: 4,
-    borderRadius: 999,
-    borderWidth: 2,
-    borderColor: neonPurple,
-    width: '100%',
-    maxWidth: 320,
-    ...Platform.select({
-      ios: {
-        shadowColor: neonPurple,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.5,
-        shadowRadius: 10,
-      },
-      android: { elevation: 10 },
-      default: {},
-    }),
-  },
-  ovalTableInner: {
-    backgroundColor: tableBorderDark,
-    borderRadius: 999,
-    padding: 4,
+    left: '50%',
+    marginLeft: -36,
+    width: 72,
+    top:'15%',
+    height: 72,
+    borderRadius: 36,
     overflow: 'hidden',
+    zIndex: 11,
   },
-  ovalTableFelt: {
-    backgroundColor: tableGreen,
-    borderRadius: 999,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  joinRoomIconPressed: { opacity: 0.85 },
+  joinRoomIconImage: {
+    width: '100%',
+    height: '100%',
+  },
+  communityOverlay: {
+    position: 'absolute',
+    top: '44%',
+    left: '-5%',
+    right: '-5%',
     alignItems: 'center',
-    minHeight: 100,
+    justifyContent: 'center',
+  },
+  communityCardsWrap: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
   },
   communityLabel: {
     fontFamily: 'PressStart2P_400Regular',
@@ -587,43 +570,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 4,
-    flexWrap: 'wrap',
   },
-  communitySlot: { width: 36, alignItems: 'center', justifyContent: 'center' },
-  communityCardSize: { width: 34, height: 48 },
+  communitySlot: { width: 46, alignItems: 'center', justifyContent: 'center' },
+  communityCardSize: { width: 44, height: 62 },
   emptyCardOutline: {
-    width: 34,
-    height: 48,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderWidth: 1,
-    borderColor: tableGreenDark,
+    width: 44,
+    height: 62,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.4,
+        shadowRadius: 4,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
-  myHandRow: {
+  bottomControls: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    zIndex: 10,
+  },
+  raiseSliderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    gap: 8,
+    paddingHorizontal: 4,
+    marginBottom: 12,
   },
-  myCardsWrap: { flexDirection: 'row', gap: 8 },
-  holeCardWrap: { alignSelf: 'flex-start' },
-  myChipsWrap: { alignItems: 'center' },
-  potRow: { alignItems: 'center', marginBottom: 10 },
-  sliderSection: { marginBottom: 10, paddingHorizontal: 4 },
-  sliderTrack: {
-    flexDirection: 'row',
-    height: 32,
-    backgroundColor: 'rgba(21, 101, 192, 0.5)',
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-  sliderSegment: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  sliderSegmentActive: { backgroundColor: 'rgba(123, 31, 162, 0.7)' },
-  sliderLabel: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: Platform.OS === 'web' ? 8 : 7,
-    color: gold,
+  raiseAmountInputWrap: {
+    flex: 1,
+    alignSelf: 'stretch',
   },
   actionBar: {
     flexDirection: 'row',
@@ -663,73 +647,5 @@ const styles = StyleSheet.create({
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 10 : 9,
     color: '#fff',
-  },
-  seatContainer: {
-    alignItems: 'center',
-    minWidth: 64,
-  },
-  seatAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    marginBottom: 4,
-  },
-  emptyAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: 'rgba(80,80,80,0.6)',
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyAvatarText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  seatBanner: {
-    backgroundColor: tableGreenDark,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-  },
-  seatName: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: Platform.OS === 'web' ? 6 : 5,
-    color: '#fff',
-  },
-  seatChips: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: Platform.OS === 'web' ? 6 : 5,
-    color: gold,
-    marginTop: 2,
-  },
-  dealerBtn: {
-    marginTop: 4,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  dealerBtnText: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 5,
-    color: '#000',
-  },
-  chipStackSmall: {
-    flexDirection: 'row',
-    gap: 2,
-    marginTop: 4,
-  },
-  chipDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
 });

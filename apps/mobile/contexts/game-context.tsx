@@ -105,18 +105,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       tableId,
       pot: 0,
       yourChips: buyIn,
-      holeCards: [
-        { rank: 'A', suit: '♠' },
-        { rank: 'K', suit: '♥' },
-      ],
+      holeCards: [null, null],
       holeCardsRevealed: [false, false],
       isYourTurn: true,
-      communityCards: [
-        { rank: 'Q', suit: '♦' },
-        { rank: 'J', suit: '♣' },
-        { rank: 'T', suit: '♠' },
-      ],
-      phase: 'flop',
+      communityCards: [],
+      phase: 'preflop',
     });
   }, [tables]);
 
@@ -180,11 +173,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           isYourTurn: false,
         };
       });
-      // Mock: give turn back after 1.5s so you can test buttons again
+      // Mock: give turn back after brief delay so you can test buttons again
       nextTurnTimeoutRef.current = setTimeout(() => {
         nextTurnTimeoutRef.current = null;
         setGame((g) => (g ? { ...g, isYourTurn: true } : null));
-      }, 1500);
+      }, 100);
     },
     []
   );
