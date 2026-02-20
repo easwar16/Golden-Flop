@@ -332,20 +332,30 @@ export default function TableScreen() {
         />
       </TouchableWithoutFeedback>
 
-      {/* Join room icon — top center of table, below balance bar */}
-      <Pressable
-        style={({ pressed }) => [
-          styles.joinRoomIcon,
-          { top: insets.top + 44 },
-          pressed && styles.joinRoomIconPressed,
-        ]}
-        onPress={() => {/* TODO: join room action */}}>
-        <Image
-          source={require('@/assets/images/join-room-icon.png')}
-          style={styles.joinRoomIconImage}
-          resizeMode="cover"
-        />
-      </Pressable>
+      {/* Avatar slots around the table */}
+      {([
+        { top: insets.top + 44, left: '50%', marginLeft: -36 },  // top center
+        { top: '24%', left: 0 },                                   // top left
+        { top: '24%', right: 0 },                                  // top right
+        { top: '58%', left: 0 },                                   // bottom left
+        { top: '58%', right: 0 },                                  // bottom right
+        { top: '76%', left: '50%', marginLeft: -36 },             // bottom center
+      ] as const).map((pos, i) => (
+        <Pressable
+          key={i}
+          style={({ pressed }) => [
+            styles.avatarSlot,
+            pos,
+            pressed && styles.joinRoomIconPressed,
+          ]}
+          onPress={() => {/* TODO: join room action */}}>
+          <Image
+            source={require('@/assets/images/avatar-placeholder.png')}
+            style={styles.joinRoomIconImage}
+            resizeMode="cover"
+          />
+        </Pressable>
+      ))}
 
       {/* Top bar floats over table */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
@@ -537,6 +547,14 @@ const styles = StyleSheet.create({
     marginLeft: -36,
     width: 72,
     top:'15%',
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
+    zIndex: 11,
+  },
+  avatarSlot: {
+    position: 'absolute',
+    width: 72,
     height: 72,
     borderRadius: 36,
     overflow: 'hidden',
