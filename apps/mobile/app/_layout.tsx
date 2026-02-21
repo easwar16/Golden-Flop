@@ -14,7 +14,7 @@ if (Platform.OS !== 'web') {
 global.Buffer = Buffer;
 
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { LinkPreviewContextProvider } from 'expo-router/build/link/preview/LinkPreviewContext';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -36,9 +36,12 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 function GlobalMusicButton() {
   const insets = useSafeAreaInsets();
   const music = useMusic();
+  const segments = useSegments();
   const isPlaying = music?.isPlaying ?? false;
   const audioReady = music?.audioReady ?? false;
   const togglePlayPause = music?.togglePlayPause ?? (() => {});
+
+  if ((segments as string[]).includes('table')) return null;
 
   return (
     <View

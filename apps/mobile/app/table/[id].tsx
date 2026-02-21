@@ -10,8 +10,10 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   ImageBackground,
   Keyboard,
@@ -118,13 +120,17 @@ function RaiseAmountInput({
 
   return (
     <View style={rsStyles.container}>
-      <View style={rsStyles.inputRow}>
+      <ImageBackground
+        source={require('@/assets/images/raise-input-bg.png')}
+        style={rsStyles.inputBg}
+        resizeMode="stretch">
         <Pressable
           style={({ pressed }) => [rsStyles.stepperBtn, pressed && rsStyles.stepperBtnPressed]}
           onPress={handleDecrement}
           hitSlop={8}>
-          <Text style={rsStyles.stepperBtnText}>−</Text>
+          <Image source={require('@/assets/images/btn-minus.png')} style={rsStyles.stepperBtnImage} resizeMode="contain" />
         </Pressable>
+
         <TextInput
           style={rsStyles.valueInput}
           value={inputText}
@@ -139,9 +145,9 @@ function RaiseAmountInput({
           style={({ pressed }) => [rsStyles.stepperBtn, pressed && rsStyles.stepperBtnPressed]}
           onPress={handleIncrement}
           hitSlop={8}>
-          <Text style={rsStyles.stepperBtnText}>+</Text>
+          <Image source={require('@/assets/images/btn-plus.png')} style={rsStyles.stepperBtnImage} resizeMode="contain" />
         </Pressable>
-      </View>
+      </ImageBackground>
     </View>
   );
 }
@@ -149,24 +155,18 @@ function RaiseAmountInput({
 const rsStyles = StyleSheet.create({
   container: {
     flex: 1,
-    // alignSelf: 'stretch',
-    backgroundColor: 'rgba(8, 8, 28, 0.88)',
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: gold,
-    paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: gold,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.4,
-        shadowRadius: 6,
-      },
-      android: { elevation: 6 },
-      default: {},
-    }),
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputBg: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 80,
+    marginHorizontal: 50,
+    paddingHorizontal: 20,
+    overflow: 'hidden',
+    marginVertical: -15,
   },
   inputRow: {
     flexDirection: 'row',
@@ -177,27 +177,115 @@ const rsStyles = StyleSheet.create({
     flex: 1,
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 11 : 10,
-    color: gold,
+    color: '#E8E4C8',
     textAlign: 'center',
-    paddingVertical: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0,0,0,0.15)',
   },
   stepperBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 215, 0, 0.25)',
-    borderWidth: 1,
-    borderColor: gold,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperBtnPressed: { opacity: 0.7 },
-  stepperBtnText: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: Platform.OS === 'web' ? 10 : 9,
-    color: gold,
+  stepperBtnImage: {
+    width: 35,
+    height: 35,
   },
 });
+
+// ── Dust particles ───────────────────────────────────────────────────────────
+const PARTICLE_DEFS = [
+  { x: 0.08, size: 3,   peakOpacity: 0.35, duration: 11000 },
+  { x: 0.19, size: 2,   peakOpacity: 0.22, duration: 14500 },
+  { x: 0.31, size: 3.5, peakOpacity: 0.28, duration: 10000 },
+  { x: 0.44, size: 2,   peakOpacity: 0.18, duration: 16000 },
+  { x: 0.55, size: 4,   peakOpacity: 0.30, duration: 12500 },
+  { x: 0.63, size: 2.5, peakOpacity: 0.20, duration: 9500  },
+  { x: 0.72, size: 3,   peakOpacity: 0.25, duration: 13000 },
+  { x: 0.82, size: 2,   peakOpacity: 0.18, duration: 15500 },
+  { x: 0.91, size: 3.5, peakOpacity: 0.32, duration: 11500 },
+  { x: 0.25, size: 2.5, peakOpacity: 0.22, duration: 17000 },
+  { x: 0.50, size: 3,   peakOpacity: 0.28, duration: 10500 },
+  { x: 0.77, size: 2,   peakOpacity: 0.20, duration: 13500 },
+];
+
+function DustParticles() {
+  const anims = useRef(PARTICLE_DEFS.map((p, i) => {
+    // Pre-seed progress so the screen starts populated
+    const initial = (i / PARTICLE_DEFS.length);
+    return new Animated.Value(initial);
+  })).current;
+
+  useEffect(() => {
+    const loops = PARTICLE_DEFS.map((p, i) => {
+      const remaining = (1 - (i / PARTICLE_DEFS.length)) * p.duration;
+      // First: complete the current cycle from the seeded position
+      const firstLeg = Animated.timing(anims[i], {
+        toValue: 1,
+        duration: remaining,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      });
+      // Then: loop full cycles
+      const fullLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(anims[i], {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anims[i], {
+            toValue: 1,
+            duration: p.duration,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      return Animated.sequence([firstLeg, fullLoop]);
+    });
+    loops.forEach(l => l.start());
+    return () => loops.forEach(l => l.stop());
+  }, []);
+
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      {PARTICLE_DEFS.map((p, i) => {
+        const translateY = anims[i].interpolate({
+          inputRange: [0, 1],
+          outputRange: [700, -80],
+        });
+        const translateX = anims[i].interpolate({
+          inputRange: [0, 0.3, 0.6, 1],
+          outputRange: [0, 8, -5, 3],
+        });
+        const opacity = anims[i].interpolate({
+          inputRange: [0, 0.1, 0.8, 1],
+          outputRange: [0, p.peakOpacity, p.peakOpacity, 0],
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              left: `${p.x * 100}%` as any,
+              bottom: 0,
+              width: p.size,
+              height: p.size,
+              borderRadius: p.size / 2,
+              backgroundColor: '#FFD060',
+              opacity,
+              transform: [{ translateY }, { translateX }],
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
 
 // Build table state from game context (replace with WebSocket subscription later)
 function useTableState(
@@ -249,7 +337,7 @@ export default function TableScreen() {
     if (game?.isYourTurn) {
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [game?.isYourTurn]);
 
@@ -273,7 +361,7 @@ export default function TableScreen() {
   const handleAction = (action: 'fold' | 'call' | 'raise', amount?: number) => {
     try {
       if (tableState.isMyTurn) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) {}
+    } catch (_) { }
     const raiseAmt = action === 'raise' ? (amount ?? raiseAmount) : amount;
     performAction(action, raiseAmt);
   };
@@ -291,6 +379,7 @@ export default function TableScreen() {
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       />
+      <DustParticles />
 
       {/* Table image — precisely sized and positioned */}
       <View style={styles.tableArea}>
@@ -304,18 +393,18 @@ export default function TableScreen() {
         <View style={styles.communityOverlay}>
           <View style={styles.communityCardsWrap}>
             <View style={styles.communityCards}>
-            {[0, 1, 2, 3, 4].map((i) => {
-              const card = communityCards[i];
-              return (
-                <View key={i} style={styles.communitySlot}>
-                  {card ? (
-                    <PokerCard card={card} style={styles.communityCardSize} />
-                  ) : (
-                    <View style={styles.emptyCardOutline} />
-                  )}
-                </View>
-              );
-            })}
+              {[0, 1, 2, 3, 4].map((i) => {
+                const card = communityCards[i];
+                return (
+                  <View key={i} style={styles.communitySlot}>
+                    {card ? (
+                      <PokerCard card={card} style={styles.communityCardSize} />
+                    ) : (
+                      <View style={styles.emptyCardOutline} />
+                    )}
+                  </View>
+                );
+              })}
             </View>
           </View>
         </View>
@@ -334,7 +423,7 @@ export default function TableScreen() {
 
       {/* Avatar slots around the table */}
       {([
-        { top: insets.top + 44, left: '50%', marginLeft: -36 },  // top center
+        { top: insets.top + 60, left: '50%', marginLeft: -36 },  // top center
         { top: '24%', left: 0 },                                   // top left
         { top: '24%', right: 0 },                                  // top right
         { top: '58%', left: 0 },                                   // bottom left
@@ -348,7 +437,7 @@ export default function TableScreen() {
             pos,
             pressed && styles.joinRoomIconPressed,
           ]}
-          onPress={() => {/* TODO: join room action */}}>
+          onPress={() => {/* TODO: join room action */ }}>
           <Image
             source={require('@/assets/images/avatar-placeholder.png')}
             style={styles.joinRoomIconImage}
@@ -359,9 +448,12 @@ export default function TableScreen() {
 
       {/* Top bar floats over table */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        <View style={styles.topBar}>
+        <ImageBackground
+          source={require('@/assets/images/topbar-bg.png')}
+          style={styles.topBar}
+          resizeMode="stretch">
+          <Image source={require('@/assets/images/coin.png')} style={styles.coinIcon} resizeMode="contain" />
           <View style={styles.balanceRow}>
-            <Text style={styles.coinIcon}>🪙</Text>
             <Text style={styles.balanceLabel}>BALANCE: </Text>
             <Text style={styles.balanceValue} numberOfLines={1}>
               {formatBalanceLong(tableState.myChips)}
@@ -381,7 +473,7 @@ export default function TableScreen() {
               <Text style={styles.leaveText}>Leave</Text>
             </Pressable>
           </View>
-        </View>
+        </ImageBackground>
       </View>
 
       {/* Bottom controls float over the table */}
@@ -449,7 +541,7 @@ export default function TableScreen() {
                 }
                 style={styles.foldBtnBg}
                 resizeMode="stretch">
-                <Text style={styles.actionBtnText}>RAISE</Text>
+                <Text style={styles.raiseBtnText}>RAISE</Text>
               </ImageBackground>
             )}
           </Pressable>
@@ -476,30 +568,29 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: 'rgba(26, 10, 46, 0.9)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: gold,
+    paddingVertical: 10,
+    paddingHorizontal: -50,
+    overflow: 'hidden',
   },
   balanceRow: {
+    marginStart: 6,
+    marginTop: 5,
     flexDirection: 'row',
     alignItems: 'center',
     minWidth: 0,
     flexShrink: 0,
   },
   topBarSpacer: { flex: 1, minWidth: 6 },
-  coinIcon: { fontSize: 14, marginRight: 2 },
+  coinIcon: { width: 22, height: 22, marginRight: 4, marginVertical: 6, marginStart: 34 },
   balanceLabel: {
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 8 : 7,
-    color: '#fff',
+    color: 'rgba(255, 245, 220, 0.8)',
   },
   balanceValue: {
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 8 : 7,
-    color: gold,
+    color: '#FFF8E8',
     flex: 1,
   },
   wifiWrap: { alignItems: 'center', justifyContent: 'center' },
@@ -533,7 +624,7 @@ const styles = StyleSheet.create({
   },
   tableArea: {
     ...StyleSheet.absoluteFillObject,
-    top: -50,
+    top: -40,
     bottom: 16,
   },
   tableImage: {
@@ -546,7 +637,7 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -36,
     width: 72,
-    top:'15%',
+    top: '15%',
     height: 72,
     borderRadius: 36,
     overflow: 'hidden',
@@ -655,7 +746,29 @@ const styles = StyleSheet.create({
   actionBtnPressed: { opacity: 0.85 },
   foldBtnWrap: { overflow: 'hidden' },
   callBtnWrap: { overflow: 'hidden' },
-  raiseBtnWrap: { overflow: 'hidden' },
+  raiseBtnWrap: {
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 220, 100, 0.75)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#FFD060',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.45,
+        shadowRadius: 6,
+      },
+      android: { elevation: 8 },
+      default: {},
+    }),
+  },
+  raiseBtnText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: Platform.OS === 'web' ? 10 : 9,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 60, 0, 0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   foldBtnBg: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
