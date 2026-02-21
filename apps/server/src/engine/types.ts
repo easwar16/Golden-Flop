@@ -49,6 +49,8 @@ export interface HandState {
   actionSequence: number;
   /** Whether this hand has finished */
   isComplete: boolean;
+  /** Size of the last bet or raise in this betting round (used for min-raise calculation) */
+  lastRaiseSize: number;
 }
 
 export interface ActionResult {

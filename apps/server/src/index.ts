@@ -10,7 +10,9 @@ import type {
 } from '@goldenflop/shared';
 
 import { RoomManager } from './room/RoomManager';
+import { TableRegistry } from './table/TableRegistry';
 import { registerSocketHandlers } from './socket/SocketHandler';
+import { initRedis, closeRedis } from './redis/RedisClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config
@@ -49,16 +51,42 @@ const io = new Server<
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Wire up
+// Boot sequence  (async so Redis init can complete before tables are created)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const roomManager = new RoomManager(io);
-registerSocketHandlers(io, roomManager);
+async function boot(): Promise<void> {
+  // 1. Optional Redis — gracefully falls back to in-memory if not configured
+  await initRedis();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Boot
-// ─────────────────────────────────────────────────────────────────────────────
+  // 2. Room manager — handles all live table sessions
+  const roomManager = new RoomManager(io);
 
-httpServer.listen(PORT, () => {
-  console.log(`\n🃏  GoldenFlop server listening on port ${PORT}\n`);
+  // 3. Table registry — creates predefined tables and restores persisted state
+  const tableRegistry = new TableRegistry(io, roomManager);
+  await tableRegistry.bootstrap();
+
+  // 4. Socket handlers — wire events to room/table logic
+  registerSocketHandlers(io, roomManager, tableRegistry);
+
+  // 5. HTTP server
+  httpServer.listen(PORT, () => {
+    console.log(`\n🃏  GoldenFlop server listening on port ${PORT}\n`);
+  });
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('[server] SIGTERM received — shutting down');
+  await closeRedis();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  await closeRedis();
+  process.exit(0);
+});
+
+boot().catch(err => {
+  console.error('[server] boot failed:', err);
+  process.exit(1);
 });

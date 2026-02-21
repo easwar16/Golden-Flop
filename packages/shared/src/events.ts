@@ -24,6 +24,13 @@ export interface JoinTablePayload {
   playerName: string;
 }
 
+/** Sit at a specific numbered seat (0–5). Auto-assigns if seatIndex omitted. */
+export interface SitAtSeatPayload {
+  tableId: string;
+  seatIndex?: number;   // undefined = auto-assign first available
+  buyIn: number;        // in lamports
+}
+
 export interface LeaveTablePayload {
   tableId: string;
 }
@@ -38,9 +45,16 @@ export interface PlayerActionPayload {
 export interface ClientToServerEvents {
   create_table: (payload: CreateTablePayload, ack: (tableId: string) => void) => void;
   join_table: (payload: JoinTablePayload, ack: (err: string | null) => void) => void;
+  /**
+   * Sit at a predefined table seat.
+   * ACK returns { seatIndex } on success or { error: string } on failure.
+   */
+  sit_at_seat: (payload: SitAtSeatPayload, ack: (res: { seatIndex: number } | { error: string }) => void) => void;
   leave_table: (payload: LeaveTablePayload) => void;
   player_action: (payload: PlayerActionPayload) => void;
   request_tables: () => void;
+  /** Preferred alias for request_tables — returns the same tables_list event */
+  get_tables: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

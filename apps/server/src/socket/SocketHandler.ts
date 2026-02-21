@@ -14,11 +14,16 @@ import type {
   SocketData,
 } from '@goldenflop/shared';
 import { RoomManager } from '../room/RoomManager';
+import { TableRegistry } from '../table/TableRegistry';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
-export function registerSocketHandlers(io: IO, roomManager: RoomManager): void {
+export function registerSocketHandlers(
+  io: IO,
+  roomManager: RoomManager,
+  tableRegistry: TableRegistry,
+): void {
   io.on('connection', (socket: Sock) => {
     console.log(`[socket] connected: ${socket.id}`);
 
@@ -48,8 +53,18 @@ export function registerSocketHandlers(io: IO, roomManager: RoomManager): void {
     }
 
     // ── Lobby ─────────────────────────────────────────────────────────────
+    // Both events return the same tables_list payload.
+    // request_tables  – legacy name (kept for backwards compatibility)
+    // get_tables      – preferred alias, same response
+    //
+    // tableRegistry is available here for future premium-gating checks,
+    // per-table metadata enrichment, or seat-map queries.
 
     socket.on('request_tables', () => {
+      socket.emit('tables_list', roomManager.getLobby());
+    });
+
+    socket.on('get_tables', () => {
       socket.emit('tables_list', roomManager.getLobby());
     });
 
@@ -94,6 +109,44 @@ export function registerSocketHandlers(io: IO, roomManager: RoomManager): void {
       console.log(`[room] ${playerId} joined ${payload.tableId}`);
     });
 
+    // ── Sit at specific seat (predefined tables) ──────────────────────────
+    //
+    // Identical to join_table but lets the player choose their seat index.
+    // Works on both predefined and dynamic tables.
+
+    socket.on('sit_at_seat', (payload, ack) => {
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) {
+        ack?.({ error: 'Table not found' });
+        return;
+      }
+
+      // Validate buy-in range
+      if (payload.buyIn < room.config.minBuyIn) {
+        ack?.({ error: `Minimum buy-in is ${room.config.minBuyIn} lamports` });
+        return;
+      }
+      if (payload.buyIn > room.config.maxBuyIn) {
+        ack?.({ error: `Maximum buy-in is ${room.config.maxBuyIn} lamports` });
+        return;
+      }
+
+      const err = room.join(socket, playerId, playerName, payload.buyIn, payload.seatIndex);
+      if (err) {
+        ack?.({ error: err });
+        return;
+      }
+
+      const seatIndex = payload.seatIndex ?? [...room['seats'].keys()].find(
+        k => room['seats'].get(k)?.id === playerId
+      ) ?? 0;
+
+      socket.data.currentTableId = payload.tableId;
+      ack?.({ seatIndex });
+      roomManager.broadcastLobby();
+      console.log(`[room] ${playerId} sat at seat ${seatIndex} @ ${payload.tableId}`);
+    });
+
     // ── Leave table ───────────────────────────────────────────────────────
 
     socket.on('leave_table', (payload) => {
@@ -116,6 +169,13 @@ export function registerSocketHandlers(io: IO, roomManager: RoomManager): void {
         return;
       }
       room.handleAction(socket.id, payload.action, payload.amount);
+    });
+
+    // ── Latency ping (client measures round-trip) ─────────────────────────
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).on('ping', (cb: () => void) => {
+      if (typeof cb === 'function') cb();
     });
 
     // ── Disconnect ────────────────────────────────────────────────────────

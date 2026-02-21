@@ -21,9 +21,13 @@ import { Room } from './Room';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
+import { NATIVE_SOL_MINT } from '../table/constants';
+
 const DEFAULT_CONFIG: Omit<TableConfig, 'smallBlind' | 'bigBlind' | 'minBuyIn' | 'maxBuyIn'> = {
   maxPlayers: 6,
   turnTimeoutMs: 30_000,
+  tokenMint: NATIVE_SOL_MINT,
+  isPremium: false,
 };
 
 export class RoomManager {
@@ -45,18 +49,31 @@ export class RoomManager {
       maxBuyIn: payload.maxBuyIn,
       maxPlayers: payload.maxPlayers ?? DEFAULT_CONFIG.maxPlayers,
       turnTimeoutMs: DEFAULT_CONFIG.turnTimeoutMs,
+      tokenMint: DEFAULT_CONFIG.tokenMint,
+      isPremium: DEFAULT_CONFIG.isPremium,
     };
-    const room = new Room(this.io, id, payload.name, creatorId, config);
+    const room = new Room(this.io, id, payload.name, creatorId, config, /* isPersistent */ false);
     this.rooms.set(id, room);
     this.broadcastLobby();
     return room;
+  }
+
+  /**
+   * Register a pre-constructed persistent room (created by TableRegistry).
+   * These rooms are never deleted by RoomManager.
+   */
+  registerPersistentRoom(room: Room): void {
+    this.rooms.set(room.id, room);
   }
 
   getRoom(id: string): Room | undefined {
     return this.rooms.get(id);
   }
 
+  /** Only deletes non-persistent rooms. */
   deleteRoom(id: string): void {
+    const room = this.rooms.get(id);
+    if (!room || room.isPersistent) return;
     this.rooms.delete(id);
     this.broadcastLobby();
   }
@@ -99,7 +116,10 @@ export class RoomManager {
           break;
         }
       }
-      if (room.playerCount === 0) this.deleteRoom(room.id);
+      // Only destroy non-persistent (dynamic) rooms when they become empty
+      if (room.playerCount === 0 && !room.isPersistent) {
+        this.deleteRoom(room.id);
+      }
     }, 60_000);
   }
 

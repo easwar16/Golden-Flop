@@ -2,7 +2,7 @@ import {
   useFonts,
   PressStart2P_400Regular,
 } from '@expo-google-fonts/press-start-2p';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [hoveredBtn, setHoveredBtn] = useState<'play' | 'private' | 'leaderboard' | null>(null);
   const [playPressed, setPlayPressed] = useState(false);
 
@@ -133,6 +134,21 @@ export default function HomeScreen() {
           </View>
         </View>
       </View>
+
+      {/* Settings button — bottom right (last so it draws on top) */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.settingsBtn,
+          { right: 16, bottom: insets.bottom },
+          pressed && styles.settingsBtnPressed,
+        ]}
+        onPress={() => router.push('/(tabs)/settings')}>
+        <ImageBackground
+          source={require('@/assets/images/settings-btn.png')}
+          style={styles.settingsBtnImage}
+          resizeMode="cover"
+        />
+      </Pressable>
     </View>
   );
 }
@@ -370,4 +386,30 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  settingsBtn: {
+    position: 'absolute',
+    zIndex: 20,
+    width: 46,
+    height: 46,
+    borderRadius: 28,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+    ...Platform.select({
+      ios: {
+        shadowColor: 'transparent',
+        shadowOpacity: 0,
+        shadowRadius: 0,
+      },
+      android: { elevation: 0 },
+      default: {},
+    }),
+  },
+  settingsBtnImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  settingsBtnPressed: { opacity: 0.75 },
 });

@@ -27,8 +27,8 @@ const musicOnImage = require('../assets/images/music-button-on.png');
 
 SplashScreen.preventAutoHideAsync();
 
-import { GameProvider } from '@/contexts/game-context';
 import { MusicProvider, useMusic } from '@/contexts/music-context';
+import { SocketProvider } from '@/contexts/socket-provider';
 import { WalletProvider } from '@/contexts/wallet-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -76,7 +76,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <WalletProvider>
-        <GameProvider>
+        <SocketProvider>
           <MusicProvider>
             <LinkPreviewContextProvider>
               <View style={styles.root}>
@@ -90,7 +90,7 @@ export default function RootLayout() {
               <StatusBar style="light" />
             </LinkPreviewContextProvider>
           </MusicProvider>
-        </GameProvider>
+        </SocketProvider>
       </WalletProvider>
     </ThemeProvider>
   );

@@ -29,7 +29,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PokerCard } from '@/components/poker/poker-card';
 import type { CardValue } from '@/constants/poker';
-import { useGame } from '@/contexts/game-context';
+import { SocketService } from '@/services/SocketService';
+import { useGameStore } from '@/stores/useGameStore';
+import { useSocketStore } from '@/stores/useSocketStore';
+import { usePokerActions } from '@/hooks/usePokerActions';
+import { useTurnTimer } from '@/hooks/useTurnTimer';
 
 // --- WebSocket-ready types (fill from WebSocket server later) ---
 export type TableSeat = {
@@ -40,7 +44,6 @@ export type TableSeat = {
   avatarUrl?: string | null;
 } | null;
 
-const NUM_SEATS = 6;
 
 export type TableViewState = {
   /** Seats: 0=top-left, 1=top-right, 2=right, 3=bottom-right, 4=bottom/me, 5=left. Null = empty seat. */
@@ -67,7 +70,6 @@ function formatBalanceLong(n: number): string {
 }
 
 const gold = '#FFD700';
-const tableGreenDark = '#0d3d2e';
 
 // ── Raise amount input ───────────────────────────────────────────────────────
 function RaiseAmountInput({
@@ -213,7 +215,7 @@ const PARTICLE_DEFS = [
 ];
 
 function DustParticles() {
-  const anims = useRef(PARTICLE_DEFS.map((p, i) => {
+  const anims = useRef(PARTICLE_DEFS.map((_p, i) => {
     // Pre-seed progress so the screen starts populated
     const initial = (i / PARTICLE_DEFS.length);
     return new Animated.Value(initial);
@@ -287,36 +289,49 @@ function DustParticles() {
   );
 }
 
-// Build table state from game context (replace with WebSocket subscription later)
-function useTableState(
-  tableId: string | undefined,
-  game: ReturnType<typeof useGame>['game'],
-  currentTable: ReturnType<typeof useGame>['currentTable']
-): TableViewState | null {
+// ── Real-time table state from Zustand store ──────────────────────────────────
+function useTableViewState(tableId: string | undefined): TableViewState | null {
+  const storedTableId = useGameStore((s) => s.tableId);
+  const phase = useGameStore((s) => s.phase);
+  const storSeats = useGameStore((s) => s.seats);
+  const communityCards = useGameStore((s) => s.communityCards);
+  const myHand = useGameStore((s) => s.myHand);
+  const holeCardsRevealed = useGameStore((s) => s.holeCardsRevealed);
+  const pot = useGameStore((s) => s.pot);
+  const myChips = useGameStore((s) => s.myChips);
+  const currentBet = useGameStore((s) => s.currentBet);
+  const isMyTurn = useGameStore((s) => s.isMyTurn);
+  const dealerSeatIndex = useGameStore((s) => s.dealerSeatIndex);
+
   return useMemo(() => {
-    if (!game || !currentTable || game.tableId !== tableId) return null;
-    const mockSeats: TableViewState['seats'] = [
-      { id: '1', name: 'DEGENKING', chips: 100_000, isDealer: true, avatarUrl: null },
-      { id: '2', name: 'CRYPTOQUEEN', chips: 150_000, isDealer: false, avatarUrl: null },
-      { id: '3', name: 'ALIENACE', chips: 75_000, isDealer: false, avatarUrl: null },
-      { id: '4', name: 'SHARK', chips: 200_000, isDealer: false, avatarUrl: null },
-      null, // seat 4 = current user (we show cards here)
-      { id: '5', name: 'CYBERPUNK', chips: 50_000, isDealer: false, avatarUrl: null },
-    ];
-    const community: (CardValue | null)[] = [...game.communityCards];
-    while (community.length < 5) community.push(null);
+    if (!storedTableId || storedTableId !== tableId) return null;
+
+    // Map SeatView[] → TableSeat[] (6 fixed slots)
+    const seats = Array.from({ length: 6 }, (_, i) => {
+      const sv = storSeats[i];
+      if (!sv) return null;
+      return {
+        id: sv.playerId,
+        name: sv.name,
+        chips: sv.chips,
+        isDealer: sv.isDealer,
+        avatarUrl: null,
+      };
+    }) as TableViewState['seats'];
+
     return {
-      seats: mockSeats,
-      communityCards: community.slice(0, 5),
-      myHand: game.holeCards,
-      myHandRevealed: [game.holeCardsRevealed[0] ?? false, game.holeCardsRevealed[1] ?? false],
-      pot: game.pot,
-      myChips: game.yourChips,
-      currentBet: game.currentBet,
-      isMyTurn: game.isYourTurn,
-      dealerSeatIndex: 0,
+      seats,
+      communityCards,
+      myHand,
+      myHandRevealed: holeCardsRevealed,
+      pot,
+      myChips,
+      currentBet,
+      isMyTurn,
+      dealerSeatIndex,
     };
-  }, [tableId, game, currentTable]);
+  }, [storedTableId, tableId, storSeats, communityCards, myHand,
+      holeCardsRevealed, pot, myChips, currentBet, isMyTurn, dealerSeatIndex]);
 }
 
 
@@ -324,24 +339,38 @@ export default function TableScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { game, currentTable, leaveTable, performAction } = useGame();
 
-  const tableState = useTableState(id, game, currentTable);
+  // ── Store subscriptions (granular to avoid full-screen re-renders) ──────
+  const isJoining = useGameStore((s) => s.isJoining);
+  const turnTimeoutAt = useGameStore((s) => s.turnTimeoutAt);
+  const raiseAmount = useGameStore((s) => s.raiseAmount);
+  const setRaiseAmount = useGameStore((s) => s.setRaiseAmount);
+  const socketStatus = useSocketStore((s) => s.status);
+
+  const tableState = useTableViewState(id);
+  const { fold, call, raise, minRaise, maxRaise, isMyTurn } = usePokerActions();
+  const { secondsLeft } = useTurnTimer(turnTimeoutAt); // available for turn timer UI
+
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
-  const [raiseAmount, setRaiseAmount] = useState(1000);
   const onLayoutRoot = useCallback(async () => {
     if (fontsLoaded || fontError) await SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
 
+  // Haptic on turn start
   useEffect(() => {
-    if (game?.isYourTurn) {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      } catch (_) { }
+    if (isMyTurn) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (_) { }
     }
-  }, [game?.isYourTurn]);
+  }, [isMyTurn]);
 
-  if (!tableState) {
+  const handleLeave = useCallback(() => {
+    if (id) SocketService.leaveTable(id);
+    router.back();
+  }, [id, router]);
+
+  const isLoading = isJoining || (!tableState && socketStatus === 'connected');
+
+  if (isLoading || (!tableState && !fontsLoaded)) {
     return (
       <View style={styles.container}>
         <ImageBackground
@@ -350,27 +379,27 @@ export default function TableScreen() {
           resizeMode="cover"
         />
         <View style={[styles.loadingWrap, { paddingTop: insets.top + 20 }]}>
-          <Text style={styles.loadingText}>Loading table…</Text>
+          <Text style={styles.loadingText}>
+            {socketStatus === 'reconnecting' ? 'Reconnecting…' : 'Loading table…'}
+          </Text>
         </View>
       </View>
     );
   }
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!tableState || (!fontsLoaded && !fontError)) return null;
 
   const handleAction = (action: 'fold' | 'call' | 'raise', amount?: number) => {
-    try {
-      if (tableState.isMyTurn) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) { }
-    const raiseAmt = action === 'raise' ? (amount ?? raiseAmount) : amount;
-    performAction(action, raiseAmt);
+    if (action === 'fold') fold();
+    else if (action === 'call') call();
+    else raise(amount ?? raiseAmount);
   };
 
   const roomId = (id?.length ?? 0) > 8 ? `${id!.slice(0, 6)}…${id!.slice(-2)}` : id ?? '—';
 
   const communityCards = tableState.communityCards;
-  const raiseMin = Math.max(tableState.currentBet > 0 ? tableState.currentBet * 2 : 100, 100);
-  const raiseMax = Math.max(tableState.myChips, raiseMin + 100);
+  const raiseMin = minRaise;
+  const raiseMax = maxRaise;
 
   return (
     <View style={styles.container} onLayout={onLayoutRoot}>
@@ -429,6 +458,7 @@ export default function TableScreen() {
         { top: '58%', left: 0 },                                   // bottom left
         { top: '58%', right: 0 },                                  // bottom right
         { top: '76%', left: '50%', marginLeft: -36 },             // bottom center
+        
       ] as const).map((pos, i) => (
         <Pressable
           key={i}
@@ -469,7 +499,7 @@ export default function TableScreen() {
             <Text style={styles.roomValue}>{roomId}</Text>
             <Pressable
               style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnPressed]}
-              onPress={() => { leaveTable(); router.back(); }}>
+              onPress={handleLeave}>
               <Text style={styles.leaveText}>Leave</Text>
             </Pressable>
           </View>

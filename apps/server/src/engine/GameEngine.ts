@@ -78,6 +78,7 @@ export function createHand(
     pot: 0,
     sidePots: [],
     currentBet: 0,
+    lastRaiseSize: config.bigBlind,
     activePlayerIndex: 0,       // set properly in postBlinds
     dealerIndex,
     smallBlindIndex,
@@ -382,7 +383,8 @@ export function autoFold(state: HandState, playerId: string): ActionResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function calcMinRaise(state: HandState): number {
-  return state.config.bigBlind > 0 ? Math.max(state.config.bigBlind, state.currentBet) : state.currentBet;
+  // Min raise = current bet + size of last raise (no-limit Texas Hold'em rule)
+  return state.currentBet + state.lastRaiseSize;
 }
 
 export function activePlayer(state: HandState): EnginePlayer | null {
@@ -409,6 +411,8 @@ function applyBet(
   s.pot += actualAmount;
 
   if (isRaise || player.currentBet > s.currentBet) {
+    const raiseSize = player.currentBet - s.currentBet;
+    s.lastRaiseSize = Math.max(raiseSize, s.config.bigBlind);
     s.currentBet = player.currentBet;
   }
 
@@ -435,6 +439,7 @@ function resetBettingRound(state: HandState): HandState {
   return {
     ...state,
     currentBet: 0,
+    lastRaiseSize: state.config.bigBlind,
     players: state.players.map(p => ({
       ...p,
       currentBet: 0,

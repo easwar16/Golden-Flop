@@ -26,13 +26,20 @@ export type PlayerAction = 'fold' | 'check' | 'call' | 'raise' | 'all-in';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface TableConfig {
+  /** All monetary values are in lamports (1 SOL = 1_000_000_000 lamports) */
   smallBlind: number;
   bigBlind: number;
   minBuyIn: number;
   maxBuyIn: number;
-  maxPlayers: number;        // 2–9 (default 6)
+  maxPlayers: number;        // always 6 for predefined tables
   turnTimeoutMs: number;     // default 30_000
   seed?: string;             // injected for deterministic shuffle
+
+  // ── Web3-ready fields ──────────────────────────────────────────────────────
+  /** Solana token mint address. 'SOL' = native SOL, SPL mint address otherwise */
+  tokenMint: string;
+  /** Premium tables require higher buy-ins; used for UI badging + future gating */
+  isPremium: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,6 +116,7 @@ export interface TableInfo {
   id: string;
   name: string;
   creator: string;
+  /** All monetary values in lamports */
   smallBlind: number;
   bigBlind: number;
   minBuyIn: number;
@@ -116,6 +124,12 @@ export interface TableInfo {
   playerCount: number;
   maxPlayers: number;
   phase: GamePhase;
+  tokenMint: string;
+  isPremium: boolean;
+  /** True for server-bootstrapped tables that persist when empty */
+  isPersistent: boolean;
+  /** Which seat indices are currently occupied (0-indexed) */
+  occupiedSeats: number[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

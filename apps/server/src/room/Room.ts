@@ -36,6 +36,7 @@ import {
   calcMinRaise,
   activePlayer,
 } from '../engine/GameEngine';
+import { savePlayers } from '../redis/TableStore';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -46,7 +47,7 @@ const SHOWDOWN_REVEAL_MS = 2_000;    // time to show cards before distributing
 // Seated player record (separate from EnginePlayer – Room concerns)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface RoomPlayer {
+export interface RoomPlayer {
   id: string;
   socketId: string;
   name: string;
@@ -64,6 +65,13 @@ export class Room {
   readonly config: TableConfig;
   readonly name: string;
   readonly creatorId: string;
+
+  /**
+   * Persistent rooms (predefined tables) are never deleted from RoomManager
+   * even when all players have left. Dynamic rooms created by players are not
+   * persistent and are cleaned up when empty.
+   */
+  readonly isPersistent: boolean;
 
   /** seatIndex (0–maxPlayers-1) → RoomPlayer | null */
   private seats: Map<number, RoomPlayer> = new Map();
@@ -83,12 +91,14 @@ export class Room {
     name: string,
     creatorId: string,
     config: TableConfig,
+    isPersistent = false,
   ) {
     this.io = io;
     this.id = id;
     this.name = name;
     this.creatorId = creatorId;
     this.config = config;
+    this.isPersistent = isPersistent;
   }
 
   // ─── Getters ──────────────────────────────────────────────────────────────
@@ -113,23 +123,55 @@ export class Room {
       playerCount: this.playerCount,
       maxPlayers: this.config.maxPlayers,
       phase: this.phase,
+      tokenMint: this.config.tokenMint,
+      isPremium: this.config.isPremium,
+      isPersistent: this.isPersistent,
+      occupiedSeats: [...this.seats.keys()],
     };
   }
 
   // ─── Join / Leave / Reconnect ─────────────────────────────────────────────
 
-  join(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>, playerId: string, playerName: string, buyIn: number): string | null {
+  /**
+   * Sit a player at the table.
+   *
+   * @param preferredSeat  Optional 0-based seat index. If omitted or taken,
+   *                       the first available seat is used.
+   * @returns null on success, or an error string.
+   */
+  join(
+    socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
+    playerId: string,
+    playerName: string,
+    buyIn: number,
+    preferredSeat?: number,
+  ): string | null {
     if (this.seats.size >= this.config.maxPlayers) return 'Table is full';
     if (buyIn < this.config.minBuyIn) return `Minimum buy-in is ${this.config.minBuyIn}`;
     if (buyIn > this.config.maxBuyIn) return `Maximum buy-in is ${this.config.maxBuyIn}`;
 
-    // Find an empty seat
-    const takenSeats = new Set(this.seats.keys());
-    let seatIndex = -1;
-    for (let i = 0; i < this.config.maxPlayers; i++) {
-      if (!takenSeats.has(i)) { seatIndex = i; break; }
+    // Validate preferred seat if specified
+    if (preferredSeat !== undefined) {
+      if (preferredSeat < 0 || preferredSeat >= this.config.maxPlayers) {
+        return `Invalid seat index ${preferredSeat}`;
+      }
+      if (this.seats.has(preferredSeat)) {
+        return `Seat ${preferredSeat} is already taken`;
+      }
     }
-    if (seatIndex === -1) return 'No available seat';
+
+    // Assign seat
+    let seatIndex: number;
+    if (preferredSeat !== undefined) {
+      seatIndex = preferredSeat;
+    } else {
+      const takenSeats = new Set(this.seats.keys());
+      seatIndex = -1;
+      for (let i = 0; i < this.config.maxPlayers; i++) {
+        if (!takenSeats.has(i)) { seatIndex = i; break; }
+      }
+      if (seatIndex === -1) return 'No available seat';
+    }
 
     const player: RoomPlayer = {
       id: playerId,
@@ -143,6 +185,9 @@ export class Room {
     this.seats.set(seatIndex, player);
     this.socketToSeat.set(socket.id, seatIndex);
     socket.join(this.id);
+
+    // Persist seat state to Redis
+    void this.persistSeats();
 
     // Broadcast join event to others
     this.io.to(this.id).emit('player_joined', {
@@ -164,6 +209,16 @@ export class Room {
     return null;
   }
 
+  /**
+   * Restore a previously-seated player from Redis (no socket yet).
+   * Called by TableRegistry on server startup. The player's socket is set to
+   * empty string; once they reconnect the normal reconnect() path updates it.
+   */
+  restorePlayer(player: RoomPlayer): void {
+    this.seats.set(player.seatIndex, player);
+    // Don't add to socketToSeat — socket is stale after a restart
+  }
+
   leave(socketId: string): void {
     const seatIndex = this.socketToSeat.get(socketId);
     if (seatIndex === undefined) return;
@@ -173,6 +228,9 @@ export class Room {
 
     this.seats.delete(seatIndex);
     this.socketToSeat.delete(socketId);
+
+    // Persist updated seat list to Redis
+    void this.persistSeats();
 
     this.io.to(this.id).emit('player_left', {
       tableId: this.id,
@@ -256,12 +314,35 @@ export class Room {
       this.finishHand();
     } else if (result.roundComplete) {
       this.handState = advancePhase(this.handState);
-      if (this.handState.phase === 'showdown') {
-        this.finishHand();
-      } else {
-        this.broadcastState();
-        this.startTurnTimer();
-      }
+      this.afterAdvance();
+    } else {
+      this.broadcastState();
+      this.startTurnTimer();
+    }
+  }
+
+  /**
+   * Called after every advancePhase.
+   * If all remaining players are all-in (no one can voluntarily act) we fast-forward
+   * through the remaining streets automatically with a short broadcast pause between each.
+   */
+  private afterAdvance(): void {
+    if (!this.handState) return;
+
+    if (this.handState.phase === 'showdown') {
+      this.finishHand();
+      return;
+    }
+
+    const canAct = this.handState.players.filter(p => !p.isFolded && !p.isAllIn);
+    if (canAct.length === 0) {
+      // All-in runout: show the current street then advance automatically
+      this.broadcastState();
+      setTimeout(() => {
+        if (!this.handState) return;
+        this.handState = advancePhase(this.handState);
+        this.afterAdvance();
+      }, 1_500);
     } else {
       this.broadcastState();
       this.startTurnTimer();
@@ -330,6 +411,9 @@ export class Room {
       if (player.chips <= 0) this.seats.delete(seatIndex);
     }
 
+    // Persist updated chip counts to Redis
+    void this.persistSeats();
+
     // Start next hand after delay if enough players remain
     if (this.seats.size >= 2) {
       setTimeout(() => this.startHand(), HAND_START_DELAY_MS);
@@ -347,6 +431,20 @@ export class Room {
     }
     this.handState = null;
     this.broadcastState();
+    void this.persistSeats();
+  }
+
+  // ─── Redis persistence ────────────────────────────────────────────────────
+
+  /** Serialize current seats to Redis. Fire-and-forget. */
+  private async persistSeats(): Promise<void> {
+    const players = [...this.seats.values()].map(p => ({
+      id: p.id,
+      name: p.name,
+      chips: p.chips,
+      seatIndex: p.seatIndex,
+    }));
+    await savePlayers(this.id, players);
   }
 
   // ─── Turn timer ───────────────────────────────────────────────────────────
@@ -403,12 +501,7 @@ export class Room {
       this.finishHand();
     } else if (result.roundComplete) {
       this.handState = advancePhase(this.handState);
-      if (this.handState.phase === 'showdown') {
-        this.finishHand();
-      } else {
-        this.broadcastState();
-        this.startTurnTimer();
-      }
+      this.afterAdvance();
     } else {
       this.broadcastState();
       this.startTurnTimer();
