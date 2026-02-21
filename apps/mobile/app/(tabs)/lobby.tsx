@@ -17,7 +17,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useGame } from '@/contexts/game-context';
+import { SocketService } from '@/services/SocketService';
+import { useLobbyStore } from '@/stores/useLobbyStore';
+import { getPlayerName } from '@/utils/player-identity';
 import { useWallet } from '@/contexts/wallet-context';
 
 const TABLE_NAMES = ['PIXEL PARADISE', 'GOLDEN TABLE', 'ROYAL FLUSH', 'ACE HIGH'];
@@ -45,7 +47,7 @@ function truncateAddress(address: string | Uint8Array | undefined): string | nul
 }
 
 export default function LobbyScreen() {
-  const { tables, joinTable, createTable } = useGame();
+  const tables = useLobbyStore((s) => s.tables);
   const { accounts } = useWallet();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -66,22 +68,37 @@ export default function LobbyScreen() {
   const shortAddress = rawAddress != null ? truncateAddress(rawAddress) : null;
   const solBalance = '1.25 SOL'; // mock; replace with real balance when available
 
-  const handleJoin = (tableId: string) => {
+  const handleJoin = async (tableId: string) => {
     const table = tables.find((t) => t.id === tableId);
     if (!table) return;
-    joinTable(tableId, table.minBuyIn);
+    const err = await SocketService.joinTable(tableId, table.minBuyIn, getPlayerName());
+    if (err) {
+      console.warn('[lobby] joinTable error:', err);
+      return;
+    }
     router.push(`/table/${tableId}`);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const sb = parseInt(smallBlind, 10) || 10;
     const bb = parseInt(bigBlind, 10) || 20;
     const min = parseInt(minBuyIn, 10) || 200;
     const max = parseInt(maxBuyIn, 10) || 2000;
-    const table = createTable(sb, bb, min, max);
+    const tableId = await SocketService.createTable({
+      name: `TABLE_${Date.now().toString(36).toUpperCase()}`,
+      smallBlind: sb,
+      bigBlind: bb,
+      minBuyIn: min,
+      maxBuyIn: max,
+    });
+    if (!tableId) return;
+    const err = await SocketService.joinTable(tableId, min, getPlayerName());
+    if (err) {
+      console.warn('[lobby] joinTable after create error:', err);
+      return;
+    }
     setShowCreate(false);
-    joinTable(table.id, min, table);
-    router.push(`/table/${table.id}`);
+    router.push(`/table/${tableId}`);
   };
 
   if (!fontsLoaded && !fontError) return null;

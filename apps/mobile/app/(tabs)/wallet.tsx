@@ -1,7 +1,7 @@
 import { useWallet } from '@/contexts/wallet-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { StyleSheet, Alert, Platform } from 'react-native';
+import { StyleSheet, Alert, Platform, ImageBackground, View } from 'react-native';
 import { Pressable } from 'react-native';
 
 function ConnectWalletButton() {
@@ -54,30 +54,41 @@ export default function WalletScreen() {
         : null;
 
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText type="title" style={styles.title}>
-        Wallet
-      </ThemedText>
-      <ThemedText style={styles.subtitle}>
-        Connect via Mobile Wallet Adapter (MWA). Use a custom dev build on Android.
-      </ThemedText>
-      {error ? (
-        <ThemedText style={styles.error}>{error}</ThemedText>
-      ) : null}
-      {shortAddress ? (
-        <ThemedText style={styles.address}>Account: {shortAddress}</ThemedText>
-      ) : null}
-      <ConnectWalletButton />
-      <SignMessageButton />
-    </ThemedView>
+    <View style={styles.root}>
+      <ImageBackground
+        source={require('@/assets/images/casino-bg.png')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      />
+      <ThemedView style={styles.container}>
+        <ThemedText type="title" style={styles.title}>
+          Wallet
+        </ThemedText>
+        <ThemedText style={styles.subtitle}>
+          Connect via Mobile Wallet Adapter (MWA). Use a custom dev build on Android.
+        </ThemedText>
+        {error ? (
+          <ThemedText style={styles.error}>{error}</ThemedText>
+        ) : null}
+        {shortAddress ? (
+          <ThemedText style={styles.address}>Account: {shortAddress}</ThemedText>
+        ) : null}
+        <ConnectWalletButton />
+        <SignMessageButton />
+      </ThemedView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     padding: 24,
     gap: 16,
+    backgroundColor: 'transparent',
   },
   title: {
     marginBottom: 8,

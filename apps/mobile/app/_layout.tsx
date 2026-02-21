@@ -14,7 +14,7 @@ if (Platform.OS !== 'web') {
 global.Buffer = Buffer;
 
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { LinkPreviewContextProvider } from 'expo-router/build/link/preview/LinkPreviewContext';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -27,8 +27,8 @@ const musicOnImage = require('../assets/images/music-button-on.png');
 
 SplashScreen.preventAutoHideAsync();
 
-import { GameProvider } from '@/contexts/game-context';
 import { MusicProvider, useMusic } from '@/contexts/music-context';
+import { SocketProvider } from '@/contexts/socket-provider';
 import { WalletProvider } from '@/contexts/wallet-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -36,9 +36,12 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 function GlobalMusicButton() {
   const insets = useSafeAreaInsets();
   const music = useMusic();
+  const segments = useSegments();
   const isPlaying = music?.isPlaying ?? false;
   const audioReady = music?.audioReady ?? false;
   const togglePlayPause = music?.togglePlayPause ?? (() => {});
+
+  if ((segments as string[]).includes('table')) return null;
 
   return (
     <View
@@ -73,7 +76,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <WalletProvider>
-        <GameProvider>
+        <SocketProvider>
           <MusicProvider>
             <LinkPreviewContextProvider>
               <View style={styles.root}>
@@ -87,7 +90,7 @@ export default function RootLayout() {
               <StatusBar style="light" />
             </LinkPreviewContextProvider>
           </MusicProvider>
-        </GameProvider>
+        </SocketProvider>
       </WalletProvider>
     </ThemeProvider>
   );
