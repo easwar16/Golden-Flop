@@ -16,6 +16,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 
 export type GamePhase =
   | 'waiting'
+  | 'countdown'
   | 'preflop'
   | 'flop'
   | 'turn'
@@ -50,6 +51,7 @@ export interface SidePot {
 export interface TableStatePayload {
   tableId: string;
   phase: GamePhase;
+  countdownSeconds: number;
   seats: (SeatView | null)[];
   communityCards: (CardValue | null)[];
   pot: number;
@@ -68,6 +70,8 @@ export interface TableStatePayload {
   myChips: number;
   smallBlind: number;
   bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
 }
 
 export interface PlayerShowdownResult {
@@ -96,6 +100,7 @@ export interface HandResultPayload {
 interface NetworkSlice {
   tableId: string | null;
   phase: GamePhase;
+  countdownSeconds: number;
   seats: (SeatView | null)[];
   communityCards: (CardValue | null)[];
   pot: number;
@@ -114,6 +119,8 @@ interface NetworkSlice {
   myChips: number;
   smallBlind: number;
   bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
 }
 
 interface UISlice {
@@ -138,6 +145,8 @@ interface GameActions {
   setRaiseAmount: (amount: number) => void;
   dismissHandResult: () => void;
   reset: () => void;
+  /** Optimistically clears isMyTurn after dispatching an action to prevent double-sends */
+  clearMyTurn: () => void;
 }
 
 const EMPTY_SEATS = Array(6).fill(null) as (SeatView | null)[];
@@ -146,6 +155,7 @@ const EMPTY_COMMUNITY = Array(5).fill(null) as (CardValue | null)[];
 const defaultNetworkSlice: NetworkSlice = {
   tableId: null,
   phase: 'waiting',
+  countdownSeconds: 0,
   seats: EMPTY_SEATS,
   communityCards: EMPTY_COMMUNITY,
   pot: 0,
@@ -164,6 +174,8 @@ const defaultNetworkSlice: NetworkSlice = {
   myChips: 0,
   smallBlind: 0,
   bigBlind: 0,
+  minBuyIn: 0,
+  maxBuyIn: 0,
 };
 
 const defaultUISlice: UISlice = {
@@ -183,6 +195,7 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
       set({
         tableId: payload.tableId,
         phase: payload.phase,
+        countdownSeconds: payload.countdownSeconds ?? 0,
         seats: payload.seats,
         communityCards: payload.communityCards,
         pot: payload.pot,
@@ -201,6 +214,8 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         myChips: payload.myChips,
         smallBlind: payload.smallBlind,
         bigBlind: payload.bigBlind,
+        minBuyIn: payload.minBuyIn,
+        maxBuyIn: payload.maxBuyIn,
         isJoining: false,
         // Reset raise amount to min on each new state if it's our turn
         raiseAmount: payload.isMyTurn ? payload.minRaise : get().raiseAmount,
@@ -220,6 +235,8 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
       }),
 
     setRaiseAmount: (raiseAmount) => set({ raiseAmount }),
+
+    clearMyTurn: () => set({ isMyTurn: false }),
 
     dismissHandResult: () => set({ lastHandResult: null }),
 

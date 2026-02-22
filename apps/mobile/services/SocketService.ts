@@ -22,7 +22,7 @@ import { Platform } from 'react-native';
 const DEV_HOST =
   Platform.OS === 'android'
     ? '10.0.2.2'          // Android emulator loopback → host machine
-    : '192.168.1.32';     // ← your LAN IP (update if your network changes)
+    : '192.168.1.71';     // ← your LAN IP (update if your network changes)
 const SERVER_URL = __DEV__
   ? `http://${DEV_HOST}:4000`
   : 'https://your-production-server.com';
@@ -116,6 +116,10 @@ class SocketServiceClass {
         }
       );
     });
+  }
+
+  watchTable(tableId: string): void {
+    this.socket?.emit('watch_table', { tableId });
   }
 
   leaveTable(tableId: string): void {

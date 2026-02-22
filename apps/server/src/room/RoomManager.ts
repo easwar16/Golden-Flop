@@ -106,6 +106,14 @@ export class RoomManager {
 
     room.broadcastState();
 
+    // If only 1 player remains, cancel any in-progress countdown immediately
+    if (room.playerCount < 2) {
+      room['clearCountdown']?.();
+    }
+
+    // Broadcast updated lobby so the disconnect is immediately reflected
+    this.broadcastLobby();
+
     // Grace period: if player doesn't reconnect within 60s, remove them
     setTimeout(() => {
       const roomStillExists = this.rooms.get(room.id);
@@ -120,6 +128,8 @@ export class RoomManager {
       if (room.playerCount === 0 && !room.isPersistent) {
         this.deleteRoom(room.id);
       }
+      // Broadcast updated lobby after the grace-period removal
+      this.broadcastLobby();
     }, 60_000);
   }
 

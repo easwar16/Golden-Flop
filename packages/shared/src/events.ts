@@ -55,6 +55,8 @@ export interface ClientToServerEvents {
   request_tables: () => void;
   /** Preferred alias for request_tables — returns the same tables_list event */
   get_tables: () => void;
+  /** Spectate a table — server responds with table_state (no hole cards) */
+  watch_table: (payload: { tableId: string }) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

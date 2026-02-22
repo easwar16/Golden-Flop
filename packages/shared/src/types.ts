@@ -17,7 +17,7 @@ export interface CardValue {
 // Game phases & actions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type GamePhase = 'waiting' | 'preflop' | 'flop' | 'turn' | 'river' | 'showdown';
+export type GamePhase = 'waiting' | 'countdown' | 'preflop' | 'flop' | 'turn' | 'river' | 'showdown';
 
 export type PlayerAction = 'fold' | 'check' | 'call' | 'raise' | 'all-in';
 
@@ -97,6 +97,9 @@ export interface TableStatePayload {
   /** UTC ms when the active player's clock expires – null if not their turn */
   turnTimeoutAt: number | null;
 
+  /** Seconds remaining in pre-game countdown (only set when phase === 'countdown') */
+  countdownSeconds: number;
+
   // ── Recipient-specific ──────────────────────────────────────────────────
   mySeatIndex: number | null;
   myHand: (CardValue | null)[];
@@ -106,6 +109,8 @@ export interface TableStatePayload {
   // Table metadata
   smallBlind: number;
   bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -160,6 +160,14 @@ export function registerSocketHandlers(
       console.log(`[room] ${playerId} left ${payload.tableId}`);
     });
 
+    // ── Watch table (spectator — gets public table_state, no hole cards) ──
+
+    socket.on('watch_table', (payload: { tableId: string }) => {
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) return;
+      socket.emit('table_state', room.buildStateFor(null));
+    });
+
     // ── Player action ─────────────────────────────────────────────────────
 
     socket.on('player_action', (payload) => {
