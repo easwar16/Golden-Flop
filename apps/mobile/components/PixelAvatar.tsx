@@ -59,5 +59,5 @@ const PixelAvatar = memo(function PixelAvatar({
 export default PixelAvatar;
 
 const styles = StyleSheet.create({
-  container: {},
+  container: { alignSelf: 'center'},
 });

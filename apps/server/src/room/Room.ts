@@ -83,6 +83,11 @@ export class Room {
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTimeoutAt: number | null = null;
 
+  // ── Countdown state ───────────────────────────────────────────────────────
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
+  private countdownSecondsRemaining = 0;
+  private static readonly COUNTDOWN_SECONDS = 5;
+
   private io: IO;
 
   constructor(
@@ -107,7 +112,8 @@ export class Room {
     return this.seats.size;
   }
 
-  get phase() {
+  get phase(): import('@goldenflop/shared').GamePhase {
+    if (this.countdownTimer !== null) return 'countdown';
     return this.handState?.phase ?? 'waiting';
   }
 
@@ -149,6 +155,11 @@ export class Room {
     if (this.seats.size >= this.config.maxPlayers) return 'Table is full';
     if (buyIn < this.config.minBuyIn) return `Minimum buy-in is ${this.config.minBuyIn}`;
     if (buyIn > this.config.maxBuyIn) return `Maximum buy-in is ${this.config.maxBuyIn}`;
+
+    // Prevent double-seating the same player
+    for (const p of this.seats.values()) {
+      if (p.id === playerId) return 'Already seated at this table';
+    }
 
     // Validate preferred seat if specified
     if (preferredSeat !== undefined) {
@@ -201,9 +212,9 @@ export class Room {
     // Send current state to the new player
     this.emitStateTo(socket);
 
-    // Start a hand if we now have enough players and none is running
-    if (this.seats.size >= 2 && !this.handState) {
-      setTimeout(() => this.startHand(), 1_000);
+    // Start countdown when second player joins (if no hand running + not already counting)
+    if (this.seats.size >= 2 && !this.handState && !this.countdownTimer) {
+      this.startCountdown();
     }
 
     return null;
@@ -247,11 +258,17 @@ export class Room {
       }
     }
 
-    this.broadcastState();
+    // Cancel countdown if not enough players remain
+    if (this.seats.size < 2 && this.countdownTimer) {
+      this.clearCountdown();
+    }
 
     if (this.seats.size < 2 && this.handState) {
       this.cancelHand();
+      return;
     }
+
+    this.broadcastState();
   }
 
   reconnect(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>, playerId: string): boolean {
@@ -349,6 +366,37 @@ export class Room {
     }
   }
 
+  // ─── Countdown ────────────────────────────────────────────────────────────
+
+  private startCountdown(): void {
+    if (this.countdownTimer || this.handState) return;
+    if (this.seats.size < 2) return;
+
+    this.countdownSecondsRemaining = Room.COUNTDOWN_SECONDS;
+    this.broadcastState(); // immediately show 'countdown' phase
+
+    this.countdownTimer = setInterval(() => {
+      this.countdownSecondsRemaining--;
+
+      if (this.countdownSecondsRemaining <= 0) {
+        this.clearCountdown();
+        this.startHand();
+      } else {
+        this.broadcastState(); // tick: clients see updated secondsRemaining
+      }
+    }, 1_000);
+  }
+
+  private clearCountdown(): void {
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+    }
+    this.countdownSecondsRemaining = 0;
+    // Broadcast so clients see the phase revert to 'waiting' if cancelled
+    this.broadcastState();
+  }
+
   // ─── Hand lifecycle ───────────────────────────────────────────────────────
 
   private startHand(): void {
@@ -386,17 +434,24 @@ export class Room {
   private async finishHand(): Promise<void> {
     if (!this.handState) return;
 
+    // Capture state before the async sleep — players leaving during the delay
+    // would null out this.handState, causing a crash in resolveShowdown.
+    const handState = this.handState;
+
     // Brief pause so clients can display the final action
     await sleep(SHOWDOWN_REVEAL_MS);
 
-    const result = resolveShowdown(this.handState);
+    // Guard: hand may have been cancelled (e.g. all players left) during the sleep
+    if (!this.handState) return;
+
+    const result = resolveShowdown(handState);
     result.tableId = this.id;
 
     // Apply chip changes back to seats
     for (const r of result.allPlayers) {
       const seat = [...this.seats.values()].find(p => p.id === r.playerId);
       if (seat) {
-        const ep = this.handState.players.find(p => p.id === r.playerId);
+        const ep = handState.players.find(p => p.id === r.playerId);
         if (ep) seat.chips = ep.chips + r.winAmount;
       }
     }
@@ -494,6 +549,9 @@ export class Room {
 
   private handleAutoFold(playerId: string): void {
     if (!this.handState) return;
+    // Guard: only fold if this player is still the active player
+    const ap = activePlayer(this.handState);
+    if (!ap || ap.id !== playerId) return;
     const result = autoFold(this.handState, playerId);
     this.handState = result.state;
 
@@ -525,8 +583,8 @@ export class Room {
     socket.emit('table_state', this.buildStateFor(player?.id ?? null));
   }
 
-  /** Build a filtered TableStatePayload for a specific recipient. */
-  buildStateFor(recipientId: string | null): TableStatePayload {
+  /** Build a filtered TableStatePayload for a specific recipient (public if null). */
+  public buildStateFor(recipientId: string | null): TableStatePayload {
     const hs = this.handState;
     const ap = hs ? activePlayer(hs) : null;
     const recipientSeat = recipientId
@@ -589,7 +647,8 @@ export class Room {
 
     return {
       tableId: this.id,
-      phase: hs?.phase ?? 'waiting',
+      phase: this.countdownTimer !== null ? 'countdown' : (hs?.phase ?? 'waiting'),
+      countdownSeconds: this.countdownSecondsRemaining,
       seats,
       communityCards: community,
       pot: hs?.pot ?? 0,
@@ -608,6 +667,8 @@ export class Room {
       myChips: recipientEp?.chips ?? recipientSeat?.chips ?? 0,
       smallBlind: this.config.smallBlind,
       bigBlind: this.config.bigBlind,
+      minBuyIn: this.config.minBuyIn,
+      maxBuyIn: this.config.maxBuyIn,
     };
   }
 }

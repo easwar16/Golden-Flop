@@ -389,9 +389,9 @@ const styles = StyleSheet.create({
   settingsBtn: {
     position: 'absolute',
     zIndex: 20,
-    width: 46,
-    height: 46,
-    borderRadius: 28,
+    width: 56,
+    height: 56,
+    borderRadius: 12,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -409,7 +409,7 @@ const styles = StyleSheet.create({
   settingsBtnImage: {
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: 12,
   },
   settingsBtnPressed: { opacity: 0.75 },
 });

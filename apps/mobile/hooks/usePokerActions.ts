@@ -17,6 +17,8 @@ type Action = 'fold' | 'check' | 'call' | 'raise' | 'all-in';
 export function usePokerActions() {
   const tableId = useGameStore((s) => s.tableId);
   const isMyTurn = useGameStore((s) => s.isMyTurn);
+  const mySeatIndex = useGameStore((s) => s.mySeatIndex);
+  const seats = useGameStore((s) => s.seats);
   const minRaise = useGameStore((s) => s.minRaise);
   const maxRaise = useGameStore((s) => s.maxRaise);
   const currentBet = useGameStore((s) => s.currentBet);
@@ -26,6 +28,13 @@ export function usePokerActions() {
   const dispatch = useCallback(
     (action: Action, amount?: number) => {
       if (!tableId || !isMyTurn) return;
+
+      // Guard: never send if the local seat is already folded or all-in
+      const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
+      if (mySeat?.isFolded || mySeat?.isAllIn) return;
+
+      // Optimistically clear turn so rapid taps / race conditions can't double-send
+      useGameStore.getState().clearMyTurn();
 
       try {
         Haptics.impactAsync(
@@ -39,7 +48,7 @@ export function usePokerActions() {
 
       SocketService.sendAction(tableId, action, amount);
     },
-    [tableId, isMyTurn]
+    [tableId, isMyTurn, mySeatIndex, seats]
   );
 
   const fold = useCallback(() => dispatch('fold'), [dispatch]);

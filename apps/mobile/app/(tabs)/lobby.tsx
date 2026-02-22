@@ -2,7 +2,7 @@ import {
   useFonts,
   PressStart2P_400Regular,
 } from '@expo-google-fonts/press-start-2p';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { useCallback, useState } from 'react';
 import {
@@ -64,18 +64,21 @@ export default function LobbyScreen() {
     if (fontsLoaded || fontError) await SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
 
+  // Re-fetch the tables list every time the lobby comes into focus
+  // (e.g. after returning from a table screen).
+  useFocusEffect(
+    useCallback(() => {
+      SocketService.requestTables();
+    }, [])
+  );
+
   const rawAddress = accounts?.[0]?.address;
   const shortAddress = rawAddress != null ? truncateAddress(rawAddress) : null;
   const solBalance = '1.25 SOL'; // mock; replace with real balance when available
 
-  const handleJoin = async (tableId: string) => {
-    const table = tables.find((t) => t.id === tableId);
-    if (!table) return;
-    const err = await SocketService.joinTable(tableId, table.minBuyIn, getPlayerName());
-    if (err) {
-      console.warn('[lobby] joinTable error:', err);
-      return;
-    }
+  const handleJoin = (tableId: string) => {
+    // Navigate to the table screen — the player taps a seat there to actually join.
+    // Do NOT call joinTable here; sit_at_seat is the single seating action.
     router.push(`/table/${tableId}`);
   };
 
@@ -184,8 +187,8 @@ export default function LobbyScreen() {
           ))}
         </ScrollView>
 
-        {/* Create form or CREATE TABLE button */}
-        {showCreate ? (
+        {/* Create form — hidden */}
+        {false && showCreate ? (
           <View style={styles.createForm}>
             <TextInput
               style={styles.input}
@@ -226,13 +229,7 @@ export default function LobbyScreen() {
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
           </View>
-        ) : (
-          <Pressable
-            style={({ pressed }) => [styles.createButton, pressed && styles.createButtonPressed]}
-            onPress={() => setShowCreate(true)}>
-            <Text style={styles.createButtonText}>CREATE TABLE</Text>
-          </Pressable>
-        )}
+        ) : null}
       </View>
     </View>
   );
