@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { NativeModules } from 'react-native';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 
 const BACKGROUND_MUSIC = require('../assets/music/funoro-youx27re-gonna-like-it-here-469728.mp3');
 const VOLUME = 0.15;
@@ -17,113 +17,103 @@ export function useMusic() {
 }
 
 function MusicProviderInner({ children }: { children: React.ReactNode }) {
-  const [audioReady, setAudioReady] = useState(false);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const playerRef = useRef<{ play: () => void; pause: () => void; cleanup?: () => void } | null>(null);
-
-  const togglePlayPause = useCallback(() => {
-    if (!audioReady || !playerRef.current) return;
-    try {
-      if (isPlaying) {
-        playerRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        playerRef.current.play();
-        setIsPlaying(true);
-      }
-    } catch {
-      // ignore
-    }
-  }, [audioReady, isPlaying]);
+  const [audioReady, setAudioReady] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    let player: AudioPlayer | null = null;
+    let subscription: { remove: () => void } | null = null;
+    let startId: ReturnType<typeof setTimeout>;
+    let fallbackId: ReturnType<typeof setTimeout>;
 
-    async function setupWithExpoAudio() {
-      const { createAudioPlayer, setAudioModeAsync } = require('expo-audio');
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionMode: 'doNotMix',
-      });
-      if (cancelled) return;
-
-      const player = createAudioPlayer(BACKGROUND_MUSIC);
-      player.loop = true;
-      player.volume = VOLUME;
-
-      if (cancelled) {
-        player.remove();
-        return;
-      }
-
-      playerRef.current = {
-        play: () => player.play(),
-        pause: () => player.pause(),
-        cleanup: () => player.remove(),
-      };
-      setAudioReady(true);
-      player.play();
-      if (!cancelled) setIsPlaying(true);
-    }
-
-    async function setupWithExpoAV() {
-      const { Audio } = require('expo-av');
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-      if (cancelled) return;
-
-      const { sound } = await Audio.Sound.createAsync(BACKGROUND_MUSIC, {
-        isLooping: true,
-        volume: VOLUME,
-      });
-      if (cancelled) {
-        await sound.unloadAsync();
-        return;
-      }
-
-      playerRef.current = {
-        play: () => sound.playAsync(),
-        pause: () => sound.pauseAsync(),
-        cleanup: () => sound.unloadAsync(),
-      };
-      setAudioReady(true);
-      await sound.playAsync();
-      if (!cancelled) setIsPlaying(true);
-    }
-
-    async function setup() {
-      // expo-audio is only available after a rebuild that includes it.
-      // Check for the native module before attempting to use it, to avoid
-      // expo-modules-core throwing an uncaught global error.
-      const hasExpoAudio = !!NativeModules?.ExpoAudio;
-      if (hasExpoAudio) {
-        try {
-          await setupWithExpoAudio();
-          return;
-        } catch {
-          // fall through to expo-av
-        }
-      }
+    async function init() {
       try {
-        await setupWithExpoAV();
+        console.log('[Music] Configuring audio session...');
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: false,
+          interruptionMode: 'doNotMix',
+        });
+
+        console.log('[Music] Creating player...');
+        player = createAudioPlayer(BACKGROUND_MUSIC);
+        playerRef.current = player;
+
+        player.loop = true;
+        player.volume = VOLUME;
+
+        const startPlay = () => {
+          if (!player) return;
+          try {
+            player.play();
+            setAudioReady(true);
+            setIsPlaying(true);
+            console.log('[Music] Playing ✓');
+          } catch (e) {
+            console.error('[Music] play() error:', e);
+          }
+        };
+
+        // If already loaded (rare but possible), play immediately
+        if (player.isLoaded) {
+          startPlay();
+          return;
+        }
+
+        // Event-driven: fire as soon as the native player signals it's ready
+        subscription = player.addListener('playbackStatusUpdate', (status) => {
+          if (status.isLoaded) {
+            subscription?.remove();
+            subscription = null;
+            clearTimeout(fallbackId);
+            startPlay();
+          }
+        });
+
+        // Fallback: if the event never fires within 8s, try playing anyway
+        fallbackId = setTimeout(() => {
+          subscription?.remove();
+          subscription = null;
+          console.warn('[Music] Fallback play triggered');
+          startPlay();
+        }, 8000);
+
       } catch (err) {
-        console.warn('[MusicProvider] All audio setup failed:', err);
+        console.error('[Music] INIT ERROR:', err);
       }
     }
 
-    const timeoutId = setTimeout(() => setup().catch(() => {}), 600);
+    // Small startup delay — Android audio subsystem needs a moment after app launch
+    startId = setTimeout(() => init(), 500);
 
     return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-      playerRef.current?.cleanup?.();
+      clearTimeout(startId);
+      clearTimeout(fallbackId);
+      subscription?.remove();
+      try { player?.remove(); } catch (_) {}
+      playerRef.current = null;
     };
   }, []);
+
+  const togglePlayPause = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) {
+      console.warn('[Music] No player');
+      return;
+    }
+    try {
+      if (isPlaying) {
+        player.pause();
+        setIsPlaying(false);
+      } else {
+        player.play();
+        setIsPlaying(true);
+      }
+    } catch (err) {
+      console.error('[Music] Toggle error:', err);
+    }
+  }, [isPlaying]);
 
   return (
     <MusicContext.Provider value={{ isPlaying, audioReady, togglePlayPause }}>

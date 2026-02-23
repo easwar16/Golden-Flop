@@ -22,8 +22,8 @@ import 'react-native-reanimated';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const musicOffImage = require('../assets/images/music-button-off.png');
-const musicOnImage = require('../assets/images/music-button-on.png');
+const musicOffImage = require('../assets/images/sound-off.png');
+const musicOnImage = require('../assets/images/sound-on.png');
 
 SplashScreen.preventAutoHideAsync();
 
@@ -41,26 +41,23 @@ function GlobalMusicButton() {
   const audioReady = music?.audioReady ?? false;
   const togglePlayPause = music?.togglePlayPause ?? (() => {});
 
-  if ((segments as string[]).includes('table')) return null;
+  // Only show on the home screen (index tab)
+  const seg = segments as string[];
+  const isHome = seg.includes('(tabs)') && (seg.includes('index') || seg.length === 1);
+  if (!isHome) return null;
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.musicButtonWrap, { top: insets.top + 8 }]}
-    >
+    <View style={[styles.musicButtonWrap, { bottom: insets.bottom }]}>
+
       <Pressable
         onPress={togglePlayPause}
-        style={({ pressed }) => [
-          pressed && styles.musicButtonPressed,
-          !audioReady && styles.musicButtonDisabled,
-        ]}
-        accessibilityLabel={audioReady ? (isPlaying ? 'Pause music' : 'Play music') : 'Music unavailable'}
+        style={({ pressed }) => [styles.musicBtnPressable, pressed && styles.musicButtonPressed]}
+        accessibilityLabel={isPlaying ? 'Pause music' : 'Play music'}
         accessibilityRole="button"
       >
-        <Image
-          source={isPlaying && audioReady ? musicOnImage : musicOffImage}
-          style={[styles.musicButtonImage, !audioReady && styles.musicButtonDisabled]}
-        />
+        {/* Both images always mounted so they're decoded and ready instantly */}
+        <Image source={musicOnImage}  style={[styles.musicButtonImage, !isPlaying && styles.hidden]} />
+        <Image source={musicOffImage} style={[styles.musicButtonImage, styles.musicOffOverlay, isPlaying && styles.hidden]} />
       </Pressable>
     </View>
   );
@@ -102,20 +99,30 @@ const styles = StyleSheet.create({
   },
   musicButtonWrap: {
     position: 'absolute',
-    right: 16,
-    left: 0,
+    right: 80, // sits left of settings button (right:16 + 56wide + 8gap)
+    width: 56,
+    height: 56,
     zIndex: 9999,
-    alignItems: 'flex-end',
-    pointerEvents: 'box-none',
     ...(Platform.OS === 'android' ? { elevation: 9999 } : {}),
   },
+  musicBtnPressable: {
+    width: 56,
+    height: 56,
+  },
   musicButtonImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 56,
+    height: 56,
+  },
+  musicOffOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  hidden: {
+    opacity: 0,
   },
   musicButtonPressed: {
-    opacity: 0.85,
+    opacity: 0.75,
   },
   musicButtonDisabled: {
     opacity: 0.7,

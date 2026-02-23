@@ -43,6 +43,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PokerCard } from '@/components/poker/poker-card';
 import PixelAvatar from '@/components/PixelAvatar';
+import DealingCards from '@/components/animations/DealingCards';
 import type { CardValue } from '@/constants/poker';
 import { SocketService } from '@/services/SocketService';
 import { useGameStore } from '@/stores/useGameStore';
@@ -806,6 +807,23 @@ export default function TableScreen() {
   const roomId = (id?.length ?? 0) > 8 ? `${id!.slice(0, 6)}…${id!.slice(-2)}` : (id ?? '—');
   const seatedCount = seats.filter(Boolean).length;
   const isInHand = phase !== 'waiting' && phase !== 'countdown';
+
+  // ── Animation layout coords (absolute screen coords) ──────────────────────
+  // The tableArea has `top: TABLE_TOP` + `marginTop: -90`, so visual top = TABLE_TOP - 90
+  const tableVisualTop = TABLE_TOP - 90;
+  // Community cards are at 42% down the table + half card height (31) to reach center
+  const deckOrigin = {
+    x: screenW / 2,
+    y: tableVisualTop + TABLE_H * 0.42 + 31,
+  };
+
+  // Compute center of any seat given its SEAT_POSITIONS entry
+  const getSeatCenter = (idx: number) => {
+    const pos = SEAT_POSITIONS[idx] as { top: number; left?: number; right?: number };
+    const cx = pos.left !== undefined ? pos.left + 32 : screenW - (pos.right ?? 0) - 32;
+    return { x: cx, y: pos.top + 32 };
+  };
+
   // A seat is joinable only when: empty, game not in progress, and we're not already seated
   const canJoinAnySeat = !isInHand && mySeatIndex === null;
 
@@ -813,6 +831,14 @@ export default function TableScreen() {
     <View style={styles.container} onLayout={onLayoutRoot}>
       <ImageBackground source={require('@/assets/images/table-room-bg.png')} style={StyleSheet.absoluteFill} resizeMode="cover" />
       <DustParticles />
+
+      {/* Dealing animation — 2 cards fly from deck to local player's seat */}
+      {mySeatIndex !== null && (
+        <DealingCards
+          deckOrigin={deckOrigin}
+          mySeatCenter={getSeatCenter(mySeatIndex)}
+        />
+      )}
 
       {/* Buy-in modal */}
       {id && (

@@ -35,6 +35,8 @@
     },
     "plugins": [
       "expo-router",
+      "expo-av",
+      "expo-audio",
       [
         "expo-build-properties",
         {
