@@ -117,9 +117,9 @@ export default function LobbyScreen() {
       <View style={[styles.content, { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 24 }]}>
         {/* Header */}
         <View style={styles.header}>
-          {/* <View style={styles.headerIconWrap}>
-            <Text style={styles.headerIcon}>♠</Text>
-          </View> */}
+          <Pressable style={styles.backBtn} onPress={() => router.push('/(tabs)')}>
+            <Text style={styles.backBtnText}>{'<'}</Text>
+          </Pressable>
           <Text style={styles.headerTitle}>TABLES</Text>
           <View style={styles.walletBadge}>
             <Text style={styles.walletIcon}>👛</Text>
@@ -284,8 +284,17 @@ const styles = StyleSheet.create({
     color: panelBg,
     fontWeight: 'bold',
   },
+  backBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginRight: 8,
+  },
+  backBtnText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: 14,
+    color: gold,
+  },
   headerTitle: {
-    paddingLeft: 20,
     paddingTop: 10,
     fontFamily: 'PressStart2P_400Regular',
     fontSize: Platform.OS === 'web' ? 14 : 12,
