@@ -1,0 +1,48 @@
+# GoldenFlop – Docker Compose for local development
+#
+# Usage:
+#   docker compose up -d          Start Postgres + Redis
+#   docker compose down           Stop containers (data persisted in volumes)
+#   docker compose down -v        Stop containers AND delete data volumes
+#   docker compose exec postgres psql -U goldenflop -d goldenflop   Access DB CLI
+#
+# After starting:
+#   npx prisma migrate dev        Apply schema migrations
+#   npx prisma db seed            Seed rooms + test data
+#   npx prisma studio             Browse DB in browser
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-goldenflop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goldenflop_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-goldenflop}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-goldenflop}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

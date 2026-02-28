@@ -14,6 +14,9 @@ const monorepoRoot = path.resolve(__dirname, '../..');
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   'stacktrace-parser': path.resolve(monorepoRoot, 'node_modules/stacktrace-parser'),
+  // Shim: @wallet-ui/core re-exports from @solana/kit but only uses devnet/mainnet/testnet
+  // URL helpers which are simple identity wrappers — no need for the full v2 kit.
+  '@solana/kit': path.resolve(__dirname, 'shims/solana-kit.js'),
 };
 
 // Resolve @/ to this app root (apps/mobile)

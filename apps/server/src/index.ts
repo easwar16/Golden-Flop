@@ -4,7 +4,7 @@ import { closeRedis } from './redis/RedisClient';
 const PORT = Number(process.env.PORT ?? 4000);
 
 async function boot(): Promise<void> {
-  const { httpServer } = await createApp();
+  const { httpServer } = await createApp({ skipDb: !process.env.DATABASE_URL });
 
   httpServer.listen(PORT, () => {
     console.log(`\n🃏  GoldenFlop server listening on port ${PORT}\n`);

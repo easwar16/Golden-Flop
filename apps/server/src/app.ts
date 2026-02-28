@@ -12,11 +12,18 @@ import { RoomManager } from './room/RoomManager';
 import { TableRegistry } from './table/TableRegistry';
 import { registerSocketHandlers } from './socket/SocketHandler';
 import { initRedis } from './redis/RedisClient';
+import { authRouter } from './auth/authRoutes';
+import { depositRouter } from './deposit/depositRoutes';
+import { vaultDepositRouter } from './deposit/vaultDepositRoutes';
+import { withdrawalRouter } from './withdrawal/withdrawalRoutes';
+import { generalLimiter } from './middleware/rateLimiter';
+import { syncFromDefinitions } from './services/room.service';
 
 export interface AppOptions {
   skipBootstrap?: boolean;
   skipRedis?: boolean;
   corsOrigin?: string;
+  skipDb?: boolean;
 }
 
 export interface AppInstance {
@@ -28,15 +35,25 @@ export interface AppInstance {
 }
 
 export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
-  const { skipBootstrap = false, skipRedis = false, corsOrigin = '*' } = opts;
+  const { skipBootstrap = false, skipRedis = false, corsOrigin = '*', skipDb = false } = opts;
 
   const app = express();
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json());
 
+  // ── Rate limiting (all API routes) ─────────────────────────────────────
+  app.use('/api', generalLimiter);
+
+  // ── Health check ───────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: Date.now() });
   });
+
+  // ── API routes ─────────────────────────────────────────────────────────
+  app.use('/api/auth',       authRouter);
+  app.use('/api/deposit',    depositRouter);
+  app.use('/api/vault',      vaultDepositRouter);
+  app.use('/api/withdrawal', withdrawalRouter);
 
   const httpServer = createServer(app);
   const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
@@ -49,6 +66,15 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
 
   if (!skipRedis) {
     await initRedis();
+  }
+
+  // ── Prisma connection (skip in unit tests) ─────────────────────────────
+  if (!skipDb) {
+    const { prisma } = await import('./db/prisma');
+    await prisma.$connect();
+
+    // Sync predefined room configs to PostgreSQL
+    await syncFromDefinitions();
   }
 
   const roomManager = new RoomManager(io);

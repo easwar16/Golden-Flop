@@ -7,4 +7,4 @@ export const APP_IDENTITY = {
   icon: './assets/images/icon.png',
 } as const;
 
-export const CLUSTER = 'solana:devnet' as const;
+export const CLUSTER = 'solana:mainnet-beta' as const;
