@@ -20,7 +20,7 @@ export interface HandResultInput {
   handId: string;
   tableId: string;
   roomId: string;
-  winnerId: string;       // DB userId of winner (or first winner for splits)
+  winnerId: string | null; // DB userId of winner (null if unauthenticated)
   potSize: number;
   rakeAmount: number;
   players: PlayerHandResult[];

@@ -34,6 +34,7 @@ import { MusicProvider, useMusic } from '@/contexts/music-context';
 import { TransitionProvider } from '@/contexts/transition-context';
 import { SocketProvider } from '@/contexts/socket-provider';
 import { WalletProvider } from '@/contexts/wallet-context';
+import { AuthProvider } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MobileWalletProvider } from '@wallet-ui/react-native-web3js';
 import { clusterApiUrl } from '@solana/web3.js';
@@ -128,9 +129,10 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <MobileWalletProvider
         chain={CLUSTER}
-        endpoint={clusterApiUrl('mainnet-beta')}
+        endpoint={clusterApiUrl('devnet')}
         identity={APP_IDENTITY}>
       <WalletProvider>
+      <AuthProvider>
         <SocketProvider>
           <MusicProvider>
             <TransitionProvider>
@@ -149,6 +151,7 @@ export default function RootLayout() {
             </TransitionProvider>
           </MusicProvider>
         </SocketProvider>
+      </AuthProvider>
       </WalletProvider>
       </MobileWalletProvider>
     </ThemeProvider>

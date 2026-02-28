@@ -49,6 +49,13 @@ export interface SidePot {
   eligiblePlayerIds: string[];
 }
 
+export interface ReservedSeatInfo {
+  seatIndex: number;
+  playerId: string;
+  playerName: string;
+  avatarSeed: string;
+}
+
 export interface TableStatePayload {
   tableId: string;
   phase: GamePhase;
@@ -73,6 +80,7 @@ export interface TableStatePayload {
   bigBlind: number;
   minBuyIn: number;
   maxBuyIn: number;
+  reservedSeats?: ReservedSeatInfo[];
 }
 
 export interface PlayerShowdownResult {
@@ -122,6 +130,7 @@ interface NetworkSlice {
   bigBlind: number;
   minBuyIn: number;
   maxBuyIn: number;
+  reservedSeats: ReservedSeatInfo[];
 }
 
 interface UISlice {
@@ -133,6 +142,8 @@ interface UISlice {
   raiseAmount: number;
   /** Result of the last finished hand, shown in overlay */
   lastHandResult: HandResultPayload | null;
+  /** Non-null when the player was kicked from the table (e.g. busted out) */
+  kickedReason: string | null;
 }
 
 interface GameActions {
@@ -140,6 +151,8 @@ interface GameActions {
   applyTableState: (payload: TableStatePayload) => void;
   applyHandResult: (payload: HandResultPayload) => void;
   setIsJoining: (joining: boolean) => void;
+  addReservation: (info: ReservedSeatInfo) => void;
+  removeReservation: (seatIndex: number) => void;
 
   // Local UI – safe to call from components
   setHoleCardRevealed: (index: 0 | 1, revealed: boolean) => void;
@@ -148,6 +161,9 @@ interface GameActions {
   reset: () => void;
   /** Optimistically clears isMyTurn after dispatching an action to prevent double-sends */
   clearMyTurn: () => void;
+  /** Set when the player is kicked from the table */
+  setKicked: (reason: string) => void;
+  clearKicked: () => void;
 }
 
 const EMPTY_SEATS = Array(6).fill(null) as (SeatView | null)[];
@@ -177,6 +193,7 @@ const defaultNetworkSlice: NetworkSlice = {
   bigBlind: 0,
   minBuyIn: 0,
   maxBuyIn: 0,
+  reservedSeats: [],
 };
 
 const defaultUISlice: UISlice = {
@@ -184,6 +201,7 @@ const defaultUISlice: UISlice = {
   holeCardsRevealed: [false, false],
   raiseAmount: 0,
   lastHandResult: null,
+  kickedReason: null,
 };
 
 export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
@@ -217,6 +235,7 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         bigBlind: payload.bigBlind,
         minBuyIn: payload.minBuyIn,
         maxBuyIn: payload.maxBuyIn,
+        reservedSeats: payload.reservedSeats ?? [],
         isJoining: false,
         // Reset raise amount to min on each new state if it's our turn
         raiseAmount: payload.isMyTurn ? payload.minRaise : get().raiseAmount,
@@ -226,6 +245,17 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
     applyHandResult: (payload) => set({ lastHandResult: payload }),
 
     setIsJoining: (isJoining) => set({ isJoining }),
+
+    addReservation: (info) => set((s) => ({
+      reservedSeats: [
+        ...s.reservedSeats.filter(r => r.seatIndex !== info.seatIndex),
+        info,
+      ],
+    })),
+
+    removeReservation: (seatIndex) => set((s) => ({
+      reservedSeats: s.reservedSeats.filter(r => r.seatIndex !== seatIndex),
+    })),
 
     // ── UI actions ────────────────────────────────────────────────────────
     setHoleCardRevealed: (index, revealed) =>
@@ -240,6 +270,9 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
     clearMyTurn: () => set({ isMyTurn: false }),
 
     dismissHandResult: () => set({ lastHandResult: null }),
+
+    setKicked: (reason) => set({ kickedReason: reason }),
+    clearKicked: () => set({ kickedReason: null }),
 
     reset: () => set({ ...defaultNetworkSlice, ...defaultUISlice }),
   }))

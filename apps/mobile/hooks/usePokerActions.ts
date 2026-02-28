@@ -55,20 +55,27 @@ export function usePokerActions() {
   const check = useCallback(() => dispatch('check'), [dispatch]);
 
   const call = useCallback(
-    () => dispatch('call'),
-    [dispatch]
+    () => {
+      if (myChips <= 0) return;
+      dispatch('call');
+    },
+    [dispatch, myChips]
   );
 
   const raise = useCallback(
     (amount?: number) => {
+      if (myChips <= 0) return;
       const raw = amount ?? raiseAmount;
       const clamped = Math.max(minRaise, Math.min(maxRaise, raw));
       dispatch('raise', clamped);
     },
-    [dispatch, raiseAmount, minRaise, maxRaise]
+    [dispatch, raiseAmount, minRaise, maxRaise, myChips]
   );
 
-  const allIn = useCallback(() => dispatch('all-in', myChips), [dispatch, myChips]);
+  const allIn = useCallback(() => {
+    if (myChips <= 0) return;
+    dispatch('all-in', myChips);
+  }, [dispatch, myChips]);
 
   const callAmount = Math.min(currentBet, myChips);
   const isMyTurn = useGameStore((s) => s.isMyTurn);

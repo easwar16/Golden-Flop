@@ -21,7 +21,7 @@ import {
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4000';
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001';
 
 // ─── Treasury info ────────────────────────────────────────────────────────────
 

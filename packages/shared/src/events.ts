@@ -33,6 +33,18 @@ export interface SitAtSeatPayload {
   playerName?: string;  // override handshake value with current store value
 }
 
+/** Reserve a seat before initiating a wallet transaction. */
+export interface ReserveSeatPayload {
+  tableId: string;
+  seatIndex: number;
+}
+
+/** Release a previously reserved seat (cancel / tx failure). */
+export interface ReleaseSeatPayload {
+  tableId: string;
+  seatIndex: number;
+}
+
 export interface LeaveTablePayload {
   tableId: string;
 }
@@ -53,6 +65,10 @@ export interface ClientToServerEvents {
    */
   sit_at_seat: (payload: SitAtSeatPayload, ack: (res: { seatIndex: number } | { error: string }) => void) => void;
   leave_table: (payload: LeaveTablePayload) => void;
+  /** Reserve a seat before wallet tx. ACK returns { ok: true } or { error: string }. */
+  reserve_seat: (payload: ReserveSeatPayload, ack: (res: { ok: true } | { error: string }) => void) => void;
+  /** Release a previously reserved seat. */
+  release_seat: (payload: ReleaseSeatPayload) => void;
   player_action: (payload: PlayerActionPayload) => void;
   request_tables: () => void;
   /** Preferred alias for request_tables — returns the same tables_list event */
@@ -96,9 +112,22 @@ export interface ActionAckPayload {
   amount: number;
 }
 
+export interface PlayerKickedPayload {
+  tableId: string;
+  reason: string;
+}
+
 export interface ErrorPayload {
   code: string;
   message: string;
+}
+
+export interface CashOutCompletePayload {
+  tableId: string;
+  /** Lamports returned to the player's wallet */
+  amount: number;
+  /** On-chain transaction signature (null if payout failed) */
+  txSignature: string | null;
 }
 
 export interface ServerToClientEvents {
@@ -118,10 +147,18 @@ export interface ServerToClientEvents {
   turn_start: (payload: TurnStartPayload) => void;
   /** Echo of processed action — confirms it landed */
   action_ack: (payload: ActionAckPayload) => void;
+  /** A seat has been reserved (pre-wallet-tx lock) */
+  seat_reserved: (payload: { tableId: string; seatIndex: number; playerId: string; playerName: string; avatarSeed: string }) => void;
+  /** A reserved seat has been released */
+  seat_released: (payload: { tableId: string; seatIndex: number }) => void;
+  /** Sent to a player who has been removed from the table (e.g. busted out) */
+  player_kicked: (payload: PlayerKickedPayload) => void;
   /** Error back to the requesting socket */
   error: (payload: ErrorPayload) => void;
   /** Sent on reconnect — same shape as table_state */
   reconnect_state: (payload: TableStatePayload) => void;
+  /** Sent to the leaving player after vault cash-out completes */
+  cash_out_complete: (payload: CashOutCompletePayload) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

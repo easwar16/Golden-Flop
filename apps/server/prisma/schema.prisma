@@ -135,14 +135,14 @@ model GameResult {
   tableId   String                        // runtime table ID (may differ from Room.id for dynamic tables)
   handId    String   @unique
   players   Json     // Array<{ playerId, name, seatIndex, startChips, endChips, winAmount }>
-  winnerId  String
+  winnerId  String?
   potSize   BigInt
   rake             BigInt           @default(0)
   settlementStatus SettlementStatus @default(OFF_CHAIN)
   createdAt        DateTime         @default(now())
 
-  winner User @relation("GameResultWinner", fields: [winnerId], references: [id])
-  room   Room @relation(fields: [roomId], references: [id])
+  winner User? @relation("GameResultWinner", fields: [winnerId], references: [id])
+  room   Room  @relation(fields: [roomId], references: [id])
 
   @@index([roomId])
   @@index([tableId])

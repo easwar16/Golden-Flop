@@ -40,11 +40,13 @@ import {
 import { savePlayers } from '../redis/TableStore';
 import { recordHandResult } from '../services/game.service';
 import { getRoom as getRoomConfig } from '../services/room.service';
+import { processRakeTransfer } from '../solana/PayoutService';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
-const HAND_START_DELAY_MS = 3_000;   // pause after hand result before next deal
-const SHOWDOWN_REVEAL_MS = 2_000;    // time to show cards before distributing
+const HAND_START_DELAY_MS = 5_000;   // pause after hand result before next deal
+const SHOWDOWN_REVEAL_MS = 5_000;    // time to show cards before distributing
+const RESERVATION_TIMEOUT_MS = 30_000; // auto-expire seat reservations after 30 seconds
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seated player record (separate from EnginePlayer – Room concerns)
@@ -64,6 +66,14 @@ export interface RoomPlayer {
   walletAddress?: string | null;
   /** Whether this player joined via on-chain vault deposit (vs internal balance). */
   isVaultPlayer?: boolean;
+}
+
+export interface SeatReservation {
+  playerId: string;
+  playerName: string;
+  avatarSeed: string;
+  reservedAt: number;
+  timeoutHandle: ReturnType<typeof setTimeout>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +97,8 @@ export class Room {
   private seats: Map<number, RoomPlayer> = new Map();
   /** socketId → seatIndex */
   private socketToSeat: Map<string, number> = new Map();
+  /** seatIndex → SeatReservation (pre-wallet-tx locks) */
+  private reservations: Map<number, SeatReservation> = new Map();
 
   private handState: HandState | null = null;
   private dealerSeatIndex = 0;
@@ -96,7 +108,7 @@ export class Room {
   // ── Countdown state ───────────────────────────────────────────────────────
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private countdownSecondsRemaining = 0;
-  private static readonly COUNTDOWN_SECONDS = 5;
+  private static readonly COUNTDOWN_SECONDS = 3;
 
   private io: IO;
 
@@ -143,6 +155,7 @@ export class Room {
       isPremium: this.config.isPremium,
       isPersistent: this.isPersistent,
       occupiedSeats: [...this.seats.keys()],
+      reservedSeats: [...this.reservations.keys()],
     };
   }
 
@@ -161,6 +174,93 @@ export class Room {
     const seatIndex = this.socketToSeat.get(socketId);
     if (seatIndex === undefined) return undefined;
     return this.seats.get(seatIndex);
+  }
+
+  // ─── Seat reservations (pre-wallet-tx lock) ─────────────────────────────
+
+  /**
+   * Reserve a seat for a player before they initiate a wallet transaction.
+   * Returns null on success or an error string.
+   */
+  reserveSeat(playerId: string, playerName: string, avatarSeed: string, seatIndex: number): string | null {
+    if (seatIndex < 0 || seatIndex >= this.config.maxPlayers) {
+      return `Invalid seat index ${seatIndex}`;
+    }
+    if (this.seats.has(seatIndex)) {
+      return 'Seat is already occupied';
+    }
+
+    // Check if reserved by another player
+    const existing = this.reservations.get(seatIndex);
+    if (existing && existing.playerId !== playerId) {
+      return 'Seat is reserved by another player';
+    }
+
+    // Release any other reservation this player holds (only one at a time)
+    for (const [idx, res] of this.reservations) {
+      if (res.playerId === playerId && idx !== seatIndex) {
+        clearTimeout(res.timeoutHandle);
+        this.reservations.delete(idx);
+        this.io.to(this.id).emit('seat_released', { tableId: this.id, seatIndex: idx });
+      }
+    }
+
+    // If same player re-reserves same seat, refresh the timeout
+    if (existing && existing.playerId === playerId) {
+      clearTimeout(existing.timeoutHandle);
+    }
+
+    const timeoutHandle = setTimeout(() => {
+      this.releaseReservation(seatIndex, playerId);
+    }, RESERVATION_TIMEOUT_MS);
+
+    this.reservations.set(seatIndex, {
+      playerId,
+      playerName,
+      avatarSeed,
+      reservedAt: Date.now(),
+      timeoutHandle,
+    });
+
+    this.io.to(this.id).emit('seat_reserved', {
+      tableId: this.id,
+      seatIndex,
+      playerId,
+      playerName,
+      avatarSeed,
+    });
+
+    return null;
+  }
+
+  /**
+   * Release a seat reservation. If playerId is provided, only release if the
+   * reservation belongs to that player.
+   */
+  releaseReservation(seatIndex: number, playerId?: string): void {
+    const res = this.reservations.get(seatIndex);
+    if (!res) return;
+    if (playerId && res.playerId !== playerId) return;
+
+    const heldMs = Date.now() - res.reservedAt;
+    console.log(`[reservation] released seat ${seatIndex} for ${res.playerName} after ${heldMs}ms (caller: ${playerId ?? 'timeout'})`);
+
+    clearTimeout(res.timeoutHandle);
+    this.reservations.delete(seatIndex);
+    this.io.to(this.id).emit('seat_released', { tableId: this.id, seatIndex });
+  }
+
+  /** Release all reservations for a given player (e.g. on disconnect or seat taken). */
+  releaseAllReservationsFor(playerId: string): void {
+    for (const [seatIndex, res] of this.reservations) {
+      if (res.playerId === playerId) {
+        const heldMs = Date.now() - res.reservedAt;
+        console.log(`[reservation] releaseAll seat ${seatIndex} for ${res.playerName} after ${heldMs}ms (player: ${playerId})`);
+        clearTimeout(res.timeoutHandle);
+        this.reservations.delete(seatIndex);
+        this.io.to(this.id).emit('seat_released', { tableId: this.id, seatIndex });
+      }
+    }
   }
 
   // ─── Join / Leave / Reconnect ─────────────────────────────────────────────
@@ -198,6 +298,11 @@ export class Room {
       if (this.seats.has(preferredSeat)) {
         return `Seat ${preferredSeat} is already taken`;
       }
+      // Block if reserved by another player
+      const reservation = this.reservations.get(preferredSeat);
+      if (reservation && reservation.playerId !== playerId) {
+        return `Seat ${preferredSeat} is reserved by another player`;
+      }
     }
 
     // Assign seat
@@ -229,6 +334,9 @@ export class Room {
     this.seats.set(seatIndex, player);
     this.socketToSeat.set(socket.id, seatIndex);
     socket.join(this.id);
+
+    // Clear reservation now that the player is seated
+    this.releaseAllReservationsFor(playerId);
 
     // Persist seat state to Redis
     void this.persistSeats();
@@ -281,6 +389,7 @@ export class Room {
       playerId: player.id,
       seatIndex,
     });
+
 
     // If it's the leaving player's turn, auto-fold them
     if (this.handState) {
@@ -338,6 +447,12 @@ export class Room {
 
     const player = this.seats.get(seatIndex);
     if (!player) return;
+
+    // Silently ignore actions from players who can't act (folded, all-in, or not their turn)
+    const ap = activePlayer(this.handState);
+    if (!ap || ap.id !== player.id) return;
+    const ep = this.handState.players.find(p => p.id === player.id);
+    if (!ep || ep.isFolded || ep.isAllIn) return;
 
     let result;
     try {
@@ -508,6 +623,14 @@ export class Room {
           const deduction = Math.min(rakeRemaining, winners[0].winAmount);
           winners[0].winAmount -= deduction;
         }
+
+        // Transfer rake on-chain to treasury (fire-and-forget)
+        const winnerSeatForRake = [...this.seats.values()].find(
+          (p: RoomPlayer) => winners.some(w => w.playerId === p.id),
+        );
+        if (winnerSeatForRake?.userId) {
+          void processRakeTransfer(this.id, BigInt(rakeAmount), winnerSeatForRake.userId);
+        }
       }
     }
 
@@ -537,11 +660,13 @@ export class Room {
     // ── Persist game result to PostgreSQL (fire-and-forget) ─────────────────
     const firstWinner = result.allPlayers.find(p => p.winAmount > 0);
     if (firstWinner) {
+      // Use the DB userId (not the socket playerId) for the FK; null for guests
+      const winnerSeat = [...this.seats.values()].find((p: RoomPlayer) => p.id === firstWinner.playerId);
       void recordHandResult({
         handId:     handState.handId,
         tableId:    this.id,
         roomId:     this.id,  // For predefined tables, room ID = table ID
-        winnerId:   firstWinner.playerId,
+        winnerId:   winnerSeat?.userId ?? null,
         potSize:    totalPot,
         rakeAmount,
         players:    playerResults,
@@ -551,9 +676,23 @@ export class Room {
     this.handState = null;
     this.broadcastState();
 
-    // Remove busted players (0 chips)
+    // Remove busted players (0 chips) and notify them
     for (const [seatIndex, player] of this.seats) {
-      if (player.chips <= 0) this.seats.delete(seatIndex);
+      if (player.chips <= 0) {
+        const socket = this.io.sockets.sockets.get(player.socketId);
+        if (socket) {
+          socket.emit('player_kicked', { tableId: this.id, reason: 'Your balance reached 0.' });
+          socket.leave(this.id);
+        }
+        this.socketToSeat.delete(player.socketId);
+        this.seats.delete(seatIndex);
+        this.io.to(this.id).emit('player_left', {
+          tableId: this.id,
+          playerId: player.id,
+          seatIndex,
+        });
+        this.addSeatCooldown(seatIndex, player);
+      }
     }
 
     // Persist updated chip counts to Redis
@@ -642,6 +781,9 @@ export class Room {
     // Guard: only fold if this player is still the active player
     const ap = activePlayer(this.handState);
     if (!ap || ap.id !== playerId) return;
+    // Guard: player may have already folded or gone all-in (race with disconnect/leave)
+    const ep = this.handState.players.find(p => p.id === playerId);
+    if (!ep || ep.isFolded || ep.isAllIn) return;
     const result = autoFold(this.handState, playerId);
     this.handState = result.state;
 
@@ -755,6 +897,14 @@ export class Room {
     const minRaise = hs ? calcMinRaise(hs) : this.config.bigBlind;
     const maxRaise = recipientEp?.chips ?? 0;
 
+    // Build reserved seats info
+    const reservedSeats = [...this.reservations.entries()].map(([idx, res]) => ({
+      seatIndex: idx,
+      playerId: res.playerId,
+      playerName: res.playerName,
+      avatarSeed: res.avatarSeed,
+    }));
+
     return {
       tableId: this.id,
       phase: this.countdownTimer !== null ? 'countdown' : (hs?.phase ?? 'waiting'),
@@ -764,6 +914,7 @@ export class Room {
       pot: hs?.pot ?? 0,
       sidePots: hs?.sidePots ?? [],
       currentBet: hs?.currentBet ?? 0,
+      reservedSeats,
       minRaise,
       maxRaise,
       activePlayerSeatIndex: ap?.seatIndex ?? null,

@@ -16,9 +16,9 @@ import { useSocketStore } from '../stores/useSocketStore';
 
 // ─── Server address ───────────────────────────────────────────────────────────
 // Set EXPO_PUBLIC_SERVER_URL in .env.local (gitignored).
-// Physical device: use your machine's LAN IP, e.g. http://192.168.x.x:4000
-// Simulator/emulator: http://localhost:4000
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4000';
+// Physical device: use your machine's LAN IP, e.g. http://192.168.x.x:4001
+// Simulator/emulator: http://localhost:4001
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001';
 
 // ─── Types (mirrors @goldenflop/shared events) ────────────────────────────────
 
@@ -107,13 +107,13 @@ class SocketServiceClass {
     });
   }
 
-  async sitAtSeat(tableId: string, buyIn: number, seatIndex?: number, avatarSeed?: string, playerName?: string): Promise<{ seatIndex: number } | { error: string }> {
+  async sitAtSeat(tableId: string, buyIn: number, seatIndex?: number, avatarSeed?: string, playerName?: string, txSignature?: string, walletAddress?: string): Promise<{ seatIndex: number } | { error: string }> {
     return new Promise((resolve) => {
       if (!this.socket) { resolve({ error: 'Not connected' }); return; }
       useGameStore.getState().setIsJoining(true);
       this.socket.emit(
         'sit_at_seat',
-        { tableId, buyIn, seatIndex, avatarSeed, playerName },
+        { tableId, buyIn, seatIndex, avatarSeed, playerName, ...(txSignature ? { txSignature, walletAddress } : {}) },
         (res: { seatIndex: number } | { error: string }) => {
           if ('error' in res) {
             useGameStore.getState().setIsJoining(false);
@@ -124,6 +124,21 @@ class SocketServiceClass {
     });
   }
 
+  /** Reserve a seat before initiating a wallet transaction. */
+  async reserveSeat(tableId: string, seatIndex: number): Promise<{ ok: true } | { error: string }> {
+    return new Promise((resolve) => {
+      if (!this.socket) { resolve({ error: 'Not connected' }); return; }
+      this.socket.emit('reserve_seat', { tableId, seatIndex }, (res: { ok: true } | { error: string }) => {
+        resolve(res);
+      });
+    });
+  }
+
+  /** Release a previously reserved seat. */
+  releaseSeat(tableId: string, seatIndex: number): void {
+    this.socket?.emit('release_seat', { tableId, seatIndex });
+  }
+
   watchTable(tableId: string): void {
     this.socket?.emit('watch_table', { tableId });
   }
@@ -131,6 +146,42 @@ class SocketServiceClass {
   leaveTable(tableId: string): void {
     this.socket?.emit('leave_table', { tableId });
     useGameStore.getState().reset();
+  }
+
+  /**
+   * Leave table and wait for vault cash-out confirmation (if applicable).
+   * Resolves with payout info or null after a timeout.
+   */
+  leaveTableWithPayout(tableId: string, timeoutMs = 5_000): Promise<{ amount: number; txSignature: string | null } | null> {
+    return new Promise((resolve) => {
+      if (!this.socket) {
+        useGameStore.getState().reset();
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this.socket?.off('cash_out_complete', handler);
+          useGameStore.getState().reset();
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      const handler = (payload: { tableId: string; amount: number; txSignature: string | null }) => {
+        if (payload.tableId !== tableId || settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.socket?.off('cash_out_complete', handler);
+        useGameStore.getState().reset();
+        resolve({ amount: payload.amount, txSignature: payload.txSignature });
+      };
+
+      this.socket.on('cash_out_complete', handler);
+      this.socket.emit('leave_table', { tableId });
+    });
   }
 
   requestTables(): void {
@@ -185,14 +236,36 @@ class SocketServiceClass {
       useGameStore.getState().applyHandResult(payload);
     });
 
+    // ── Seat reservation events ─────────────────────────────────────────
+
+    s.on('seat_reserved', (payload: { tableId: string; seatIndex: number; playerId: string; playerName: string; avatarSeed: string }) => {
+      useGameStore.getState().addReservation(payload);
+    });
+
+    s.on('seat_released', (payload: { tableId: string; seatIndex: number }) => {
+      useGameStore.getState().removeReservation(payload.seatIndex);
+    });
+
+    // ── Kicked (busted out) ─────────────────────────────────────────────
+
+    s.on('player_kicked', (payload: { tableId: string; reason: string }) => {
+      console.log('[socket] kicked from table:', payload.reason);
+      useGameStore.getState().reset();
+      useGameStore.getState().setKicked(payload.reason);
+    });
+
     // ── Lobby events ─────────────────────────────────────────────────────
 
     s.on('tables_list', (tables) => {
       useLobbyStore.getState().setTables(tables);
     });
 
-    // When any player joins, re-request table state so observers see the updated seats
+    // When any player joins or leaves, re-request table state so observers see the updated seats
     s.on('player_joined', (payload: { tableId: string }) => {
+      s.emit('watch_table', { tableId: payload.tableId });
+    });
+
+    s.on('player_left', (payload: { tableId: string }) => {
       s.emit('watch_table', { tableId: payload.tableId });
     });
 

@@ -12,6 +12,7 @@ interface ActionBarProps {
   isYourTurn: boolean;
   onAction: (action: PokerAction, amount?: number) => void;
   disabled?: boolean;
+  myChips?: number;
 }
 
 export function ActionBar({
@@ -20,7 +21,9 @@ export function ActionBar({
   isYourTurn,
   onAction,
   disabled = false,
+  myChips = 0,
 }: ActionBarProps) {
+  const zeroBalance = myChips <= 0;
   const handlePress = (action: PokerAction, amount?: number) => {
     if (action === 'all-in') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -39,21 +42,21 @@ export function ActionBar({
         <ThemedText style={styles.buttonText}>Fold</ThemedText>
       </Pressable>
       <Pressable
-        style={({ pressed }) => [styles.button, styles.call, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.button, styles.call, pressed && styles.pressed, zeroBalance && styles.disabledButton]}
         onPress={() => handlePress('call')}
-        disabled={disabled || !isYourTurn}>
+        disabled={disabled || !isYourTurn || zeroBalance}>
         <ThemedText style={styles.buttonText}>Call {callAmount > 0 ? callAmount : '—'}</ThemedText>
       </Pressable>
       <Pressable
-        style={({ pressed }) => [styles.button, styles.raise, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.button, styles.raise, pressed && styles.pressed, zeroBalance && styles.disabledButton]}
         onPress={() => handlePress('raise', minRaise)}
-        disabled={disabled || !isYourTurn}>
+        disabled={disabled || !isYourTurn || zeroBalance}>
         <ThemedText style={styles.buttonText}>Raise</ThemedText>
       </Pressable>
       <Pressable
-        style={({ pressed }) => [styles.button, styles.allIn, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.button, styles.allIn, pressed && styles.pressed, zeroBalance && styles.disabledButton]}
         onPress={() => handlePress('all-in')}
-        disabled={disabled || !isYourTurn}>
+        disabled={disabled || !isYourTurn || zeroBalance}>
         <ThemedText style={styles.buttonText}>All-In</ThemedText>
       </Pressable>
     </View>
@@ -101,6 +104,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.85,
+  },
+  disabledButton: {
+    opacity: 0.4,
   },
   buttonText: {
     color: '#fff',
