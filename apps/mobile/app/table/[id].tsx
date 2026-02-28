@@ -47,6 +47,10 @@ import PixelAvatar from '@/components/PixelAvatar';
 import DealingCards from '@/components/animations/DealingCards';
 import type { CardValue } from '@/constants/poker';
 import { SocketService } from '@/services/SocketService';
+import { useAuth } from '@/contexts/auth-context';
+import { useWallet } from '@/contexts/wallet-context';
+import { buildVaultBuyInTransaction, notifyDeposit } from '@/services/DepositService';
+import { PublicKey } from '@solana/web3.js';
 import { useGameStore } from '@/stores/useGameStore';
 import { useLobbyStore } from '@/stores/useLobbyStore';
 import { useUserStore } from '@/stores/useUserStore';
@@ -396,6 +400,10 @@ const BuyInModal = memo(function BuyInModal({
   const avatarSeed = useUserStore((s) => s.avatarSeed);
   const username = useUserStore((s) => s.username);
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
+  const [sending, setSending] = useState(false);
+
+  const { token, isAuthenticated } = useAuth();
+  const { accounts, signAndSendTransaction } = useWallet();
 
   // Reset to minBuyIn whenever the modal opens for a new seat
   useEffect(() => {
@@ -412,10 +420,27 @@ const BuyInModal = memo(function BuyInModal({
       setAlert({ title: 'INVALID AMOUNT', message: `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
       return;
     }
-    onClose();
-    const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
-    if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
-  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose]);
+
+    if (!accounts?.[0] || !isAuthenticated || !token) {
+      setAlert({ title: 'WALLET REQUIRED', message: 'Connect your wallet first' });
+      return;
+    }
+
+    setSending(true);
+    try {
+      const walletAddress = new PublicKey(accounts[0].address).toBase58();
+      const tx = await buildVaultBuyInTransaction(walletAddress, buyIn, tableId);
+      const txSignature = await signAndSendTransaction(tx);
+      await notifyDeposit(token, 'SOL', txSignature, String(buyIn));
+      onClose();
+      const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
+      if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
+    } catch (e) {
+      setAlert({ title: 'TRANSACTION FAILED', message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSending(false);
+    }
+  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose, accounts, isAuthenticated, token, signAndSendTransaction]);
 
   return (
     <>
@@ -438,9 +463,10 @@ const BuyInModal = memo(function BuyInModal({
                   placeholderTextColor="rgba(255,255,255,0.4)"
                 />
                 <Pressable
-                  style={({ pressed }) => [bimStyles.btn, pressed && bimStyles.btnPressed]}
-                  onPress={handleConfirm}>
-                  <Text style={bimStyles.btnText}>SIT DOWN</Text>
+                  style={({ pressed }) => [bimStyles.btn, pressed && bimStyles.btnPressed, sending && { opacity: 0.5 }]}
+                  onPress={handleConfirm}
+                  disabled={sending}>
+                  <Text style={bimStyles.btnText}>{sending ? 'SIGNING...' : 'SIT DOWN'}</Text>
                 </Pressable>
                 <Pressable onPress={onClose} style={{ paddingVertical: 4 }}>
                   <Text style={bimStyles.cancel}>Cancel</Text>

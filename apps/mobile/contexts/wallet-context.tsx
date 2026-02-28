@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { useMobileWallet } from '@wallet-ui/react-native-web3js';
 
 /** Minimal type for account (Uint8Array address for backward compat with auth-context). */
@@ -10,6 +11,7 @@ type WalletContextValue = {
   authorize: () => Promise<void>;
   deauthorize: () => Promise<void>;
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
+  signAndSendTransaction: (transaction: Transaction | VersionedTransaction, minContextSlot?: number) => Promise<string>;
   isLoading: boolean;
   error: string | null;
 };
@@ -26,6 +28,7 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
     connect,
     disconnect,
     signMessage: mwaSign,
+    signAndSendTransaction: mwaSignAndSend,
   } = useMobileWallet();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -68,12 +71,21 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
     [account, mwaSign],
   );
 
+  const signAndSendTransaction = useCallback(
+    async (transaction: Transaction | VersionedTransaction, minContextSlot?: number): Promise<string> => {
+      if (!account) throw new Error('Wallet not connected');
+      return await mwaSignAndSend(transaction, minContextSlot ?? 0);
+    },
+    [account, mwaSignAndSend],
+  );
+
   const value: WalletContextValue = {
     accounts,
     authToken: undefined,
     authorize,
     deauthorize,
     signMessage,
+    signAndSendTransaction,
     isLoading,
     error,
   };
