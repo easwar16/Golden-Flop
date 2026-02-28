@@ -36,8 +36,15 @@ async function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T>
 
 // ─── Retry helper ────────────────────────────────────────────────────────────
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 1;
 const BASE_DELAY_MS = 1_000;
+
+/** Reserve for Solana tx fee (~5000 lamports, use 10000 for safety) */
+const TX_FEE_BUFFER = 10_000n;
+
+/** Minimum balance to keep in vault: rent-exempt minimum (~890880) + tx fee buffer */
+const RENT_EXEMPT_MIN = 890_880n;
+const VAULT_RESERVE = RENT_EXEMPT_MIN + TX_FEE_BUFFER;
 
 async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -110,12 +117,13 @@ export async function processPlayerCashOut(
     });
 
     try {
-      // Check vault balance
+      // Check vault balance — must keep VAULT_RESERVE (rent-exempt + tx fee)
       const vaultBalance = await getVaultBalance(roomId);
-      if (vaultBalance < lamports) {
+      const maxTransferable = vaultBalance - VAULT_RESERVE;
+      if (maxTransferable <= 0n) {
         console.error(
-          `[PayoutService] Insufficient vault balance for room ${roomId}. ` +
-          `Need ${lamports}, have ${vaultBalance}. Payout ${payout.id} marked FAILED.`,
+          `[PayoutService] Vault balance ${vaultBalance} too low to cash out. ` +
+          `Need > ${VAULT_RESERVE}. Payout ${payout.id} marked FAILED.`,
         );
         await prisma.payout.update({
           where: { id: payout.id },
@@ -124,9 +132,17 @@ export async function processPlayerCashOut(
         return null;
       }
 
+      // Cap transfer to what the vault can actually afford
+      const transferAmount = lamports > maxTransferable ? maxTransferable : lamports;
+      if (transferAmount < lamports) {
+        console.warn(
+          `[PayoutService] Vault can only afford ${transferAmount} of ${lamports} lamports. Partial payout.`,
+        );
+      }
+
       // Send on-chain transfer with retry
       const signature = await withRetry(() =>
-        transferSOLFromVault(roomId, playerWallet, lamports),
+        transferSOLFromVault(roomId, playerWallet, transferAmount),
       );
 
       // Update payout record
@@ -168,6 +184,16 @@ export async function processRakeTransfer(
 ): Promise<string | null> {
   if (lamports <= 0n) return null;
 
+  // Skip on-chain transfer for tiny rake amounts — the destination account
+  // needs at least the rent-exempt minimum (~890880 lamports) to exist.
+  // Small rakes accumulate in the vault and are collected via the sweep endpoint.
+  if (lamports < RENT_EXEMPT_MIN) {
+    console.log(
+      `[PayoutService] rake ${lamports} lamports too small for on-chain transfer (need ${RENT_EXEMPT_MIN}). Accumulating in vault.`,
+    );
+    return null;
+  }
+
   return withRoomLock(roomId, async () => {
     const payout = await prisma.payout.create({
       data: {
@@ -180,9 +206,21 @@ export async function processRakeTransfer(
     });
 
     try {
+      // Check vault can afford rake transfer while staying rent-exempt
+      const vaultBalance = await getVaultBalance(roomId);
+      const maxTransferable = vaultBalance - VAULT_RESERVE;
+      if (maxTransferable <= 0n) {
+        console.warn(
+          `[PayoutService] Vault balance ${vaultBalance} too low for rake transfer. Skipping payout ${payout.id}.`,
+        );
+        await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+        return null;
+      }
+      const transferAmount = lamports > maxTransferable ? maxTransferable : lamports;
+
       const treasury = getTreasuryAddress();
       const signature = await withRetry(() =>
-        transferSOLFromVault(roomId, treasury, lamports),
+        transferSOLFromVault(roomId, treasury, transferAmount),
       );
 
       await prisma.payout.update({

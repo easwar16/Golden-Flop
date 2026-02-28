@@ -107,6 +107,9 @@ export interface TableStatePayload {
   isMyTurn: boolean;
   myChips: number;
 
+  // Reservations (pre-wallet-tx seat locks)
+  reservedSeats: { seatIndex: number; playerId: string; playerName: string; avatarSeed: string }[];
+
   // Table metadata
   smallBlind: number;
   bigBlind: number;
@@ -136,6 +139,8 @@ export interface TableInfo {
   isPersistent: boolean;
   /** Which seat indices are currently occupied (0-indexed) */
   occupiedSeats: number[];
+  /** Which seat indices are reserved (pre-wallet-tx lock) */
+  reservedSeats: number[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

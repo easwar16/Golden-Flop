@@ -43,14 +43,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PokerCard } from '@/components/poker/poker-card';
+import { GameActionButtons } from '@/components/poker/GameActionButtons';
 import PixelAvatar from '@/components/PixelAvatar';
 import DealingCards from '@/components/animations/DealingCards';
 import type { CardValue } from '@/constants/poker';
 import { SocketService } from '@/services/SocketService';
-import { useAuth } from '@/contexts/auth-context';
 import { useWallet } from '@/contexts/wallet-context';
-import { buildVaultBuyInTransaction, notifyDeposit } from '@/services/DepositService';
-import { PublicKey } from '@solana/web3.js';
+import { buildVaultBuyInTransaction } from '@/services/DepositService';
+import { SOLANA_NETWORK } from '@/constants/solana';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useGameStore } from '@/stores/useGameStore';
 import { useLobbyStore } from '@/stores/useLobbyStore';
 import { useUserStore } from '@/stores/useUserStore';
@@ -63,11 +64,13 @@ import { useTurnTimer } from '@/hooks/useTurnTimer';
 
 const gold = '#FFD700';
 
-function formatChips(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}◎`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
+function formatSol(lamports: number): string {
+  const sol = lamports / 1_000_000_000;
+  if (sol >= 1_000) return `${(sol / 1_000).toFixed(1)}K ◎`;
+  if (sol >= 1) return `${sol.toFixed(2)} ◎`;
+  if (sol >= 0.01) return `${sol.toFixed(2)} ◎`;
+  if (sol > 0) return `${sol.toFixed(4)} ◎`;
+  return '0 ◎';
 }
 
 // Seat positions are computed dynamically in the component from screen dimensions.
@@ -133,6 +136,7 @@ interface SeatSlotProps {
   timerProgress: number;
   canJoin: boolean;
   isTaken: boolean; // seat is occupied but we don't have full data yet
+  reservation?: { seatIndex: number; playerId: string; playerName: string; avatarSeed: string };
   onJoin: (seatIndex: number) => void;
 }
 
@@ -143,6 +147,7 @@ const SeatSlot = memo(function SeatSlot({
   timerProgress,
   canJoin,
   isTaken,
+  reservation,
   onJoin,
 }: SeatSlotProps) {
   // Read only this seat from the store to prevent re-renders when other seats change
@@ -172,6 +177,10 @@ const SeatSlot = memo(function SeatSlot({
       {/* Avatar */}
       {seat ? (
         <PixelAvatar seed={seed} size={56} borderRadius={25} />
+      ) : reservation ? (
+        <View style={{ opacity: 0.45 }}>
+          <PixelAvatar seed={reservation.avatarSeed} size={56} borderRadius={25} />
+        </View>
       ) : (
         <Image
           source={require('@/assets/images/avatar-placeholder.png')}
@@ -194,22 +203,33 @@ const SeatSlot = memo(function SeatSlot({
         </View>
       )}
 
+      {/* Reserved indicator — avatar shown at reduced opacity with "..." */}
+      {!seat && reservation && (
+        <View style={slotStyles.takenBadge}>
+          <Text style={slotStyles.takenBadgeText}>...</Text>
+        </View>
+      )}
+
       {/* Taken indicator when seat is occupied but no seat data yet */}
-      {!seat && isTaken && (
+      {!seat && isTaken && !reservation && (
         <View style={slotStyles.takenBadge}>
           <Text style={slotStyles.takenBadgeText}>•</Text>
         </View>
       )}
 
       {/* Player info strip below avatar */}
-      {seat && (
+      {seat ? (
         <View style={slotStyles.info}>
           <Text style={slotStyles.name} numberOfLines={1}>{displayName}</Text>
-          <Text style={slotStyles.chips}>{formatChips(seat.chips)}</Text>
+          <Text style={slotStyles.chips}>{formatSol(seat.chips)}</Text>
           {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
           {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
         </View>
-      )}
+      ) : reservation ? (
+        <View style={slotStyles.info}>
+          <Text style={[slotStyles.name, { opacity: 0.5 }]} numberOfLines={1}>{reservation.playerName}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 });
@@ -278,7 +298,7 @@ const slotStyles = StyleSheet.create({
     fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#00FFAA',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
-  allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: '#FF6B6B' },
+  allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FF6B6B' },
   foldedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.4)' },
 });
 
@@ -396,23 +416,39 @@ function lamportsToSol(lamports: number): string {
 const BuyInModal = memo(function BuyInModal({
   visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose,
 }: BuyInModalProps) {
-  const [amount, setAmount] = useState(String(minBuyIn));
+  // Input is in SOL (e.g. "0.05"), converted to lamports on confirm
+  const [amount, setAmount] = useState(lamportsToSol(minBuyIn));
   const avatarSeed = useUserStore((s) => s.avatarSeed);
   const username = useUserStore((s) => s.username);
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
   const [sending, setSending] = useState(false);
+  /** Tracks whether a reservation is active — release on modal close unless consumed */
+  const hasReservationRef = useRef(false);
 
-  const { token, isAuthenticated } = useAuth();
-  const { accounts, signAndSendTransaction } = useWallet();
+  const { accounts, signAndSendTransaction, deauthorize } = useWallet();
 
-  // Reset to minBuyIn whenever the modal opens for a new seat
+  // Reset to min SOL whenever the modal opens for a new seat
   useEffect(() => {
-    if (visible) setAmount(String(minBuyIn));
+    if (visible) {
+      setAmount(lamportsToSol(minBuyIn));
+      hasReservationRef.current = false;
+    }
   }, [visible, minBuyIn]);
 
+  // Close the modal — reservation stays active and expires via server timeout
+  const handleClose = useCallback(() => {
+    hasReservationRef.current = false;
+    onClose();
+  }, [onClose]);
+
   const handleConfirm = useCallback(async () => {
-    const buyIn = parseInt(amount, 10);
-    if (isNaN(buyIn) || buyIn < minBuyIn) {
+    const solAmount = parseFloat(amount);
+    if (isNaN(solAmount) || solAmount <= 0) {
+      setAlert({ title: 'INVALID AMOUNT', message: `Enter a valid SOL amount` });
+      return;
+    }
+    const buyIn = Math.round(solAmount * 1_000_000_000);
+    if (buyIn < minBuyIn) {
       setAlert({ title: 'INVALID AMOUNT', message: `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
       return;
     }
@@ -421,31 +457,62 @@ const BuyInModal = memo(function BuyInModal({
       return;
     }
 
-    if (!accounts?.[0] || !isAuthenticated || !token) {
+    if (!accounts?.[0]) {
       setAlert({ title: 'WALLET REQUIRED', message: 'Connect your wallet first' });
       return;
     }
 
     setSending(true);
     try {
+      // 1. Reserve the seat server-side BEFORE any wallet interaction
+      const reservation = await SocketService.reserveSeat(tableId, seatIndex);
+      if ('error' in reservation) {
+        setAlert({ title: 'SEAT UNAVAILABLE', message: reservation.error });
+        setSending(false);
+        return;
+      }
+      hasReservationRef.current = true;
+
+      // 2. Build and sign the wallet transaction
       const walletAddress = new PublicKey(accounts[0].address).toBase58();
-      const tx = await buildVaultBuyInTransaction(walletAddress, buyIn, tableId);
+      const tx = await buildVaultBuyInTransaction(walletAddress, buyIn, tableId, SOLANA_NETWORK);
       const txSignature = await signAndSendTransaction(tx);
-      await notifyDeposit(token, 'SOL', txSignature, String(buyIn));
+      // Reservation will be consumed by sit_at_seat — don't release on close
+      hasReservationRef.current = false;
       onClose();
-      const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
+
+      // 3. Server verifies the on-chain deposit and seats the player
+      const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username, txSignature, walletAddress);
       if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
     } catch (e) {
-      setAlert({ title: 'TRANSACTION FAILED', message: e instanceof Error ? e.message : String(e) });
+      // Don't release the reservation on failure — let the server timeout (15s)
+      // handle it so other players still see the seat as blocked.
+      hasReservationRef.current = false;
+
+      const raw = e instanceof Error ? e.message : String(e);
+      let message = raw;
+      if (raw.includes('ConnectionFailedException') || raw.includes('Unable to connect to websocket')) {
+        message = 'Could not connect to your wallet. Make sure your wallet app is open and try again.';
+      } else if (raw.includes('authorization request failed') || raw.includes('authorization')) {
+        message = 'Wallet session expired. Reconnect your wallet in Settings to continue.';
+        deauthorize().catch(() => {});
+      } else if (raw.includes('declined') || raw.includes('rejected') || raw.includes('cancelled')) {
+        message = 'Transaction was cancelled.';
+      } else if (raw.includes('insufficient') || raw.includes('Insufficient')) {
+        message = 'Insufficient SOL balance for this buy-in.';
+      } else if (raw.includes('timeout') || raw.includes('Timeout')) {
+        message = 'Wallet request timed out. Please try again.';
+      }
+      setAlert({ title: 'TRANSACTION FAILED', message });
     } finally {
       setSending(false);
     }
-  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose, accounts, isAuthenticated, token, signAndSendTransaction]);
+  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose, accounts, signAndSendTransaction]);
 
   return (
     <>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <TouchableWithoutFeedback onPress={onClose}>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+        <TouchableWithoutFeedback onPress={handleClose}>
           <View style={bimStyles.overlay}>
             <TouchableWithoutFeedback onPress={() => { }}>
               <View style={bimStyles.panel}>
@@ -457,8 +524,8 @@ const BuyInModal = memo(function BuyInModal({
                 <TextInput
                   style={bimStyles.input}
                   value={amount}
-                  onChangeText={(t) => setAmount(t.replace(/\D/g, ''))}
-                  keyboardType="number-pad"
+                  onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
+                  keyboardType="decimal-pad"
                   selectTextOnFocus
                   placeholderTextColor="rgba(255,255,255,0.4)"
                 />
@@ -468,7 +535,7 @@ const BuyInModal = memo(function BuyInModal({
                   disabled={sending}>
                   <Text style={bimStyles.btnText}>{sending ? 'SIGNING...' : 'SIT DOWN'}</Text>
                 </Pressable>
-                <Pressable onPress={onClose} style={{ paddingVertical: 4 }}>
+                <Pressable onPress={handleClose} style={{ paddingVertical: 4 }}>
                   <Text style={bimStyles.cancel}>Cancel</Text>
                 </Pressable>
               </View>
@@ -750,7 +817,7 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
           zIndex: 60,
         }}
       >
-        +{formatChips(winAmount)}
+        +{formatSol(winAmount)}
       </Animated.Text>
     </>
   );
@@ -791,40 +858,50 @@ const pbStyles = StyleSheet.create({
 
 interface RaiseInputProps { min: number; max: number; value: number; onChange: (v: number) => void; }
 
+/** All props (min, max, value, onChange) are in lamports. Display is in SOL. */
 const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onChange }: RaiseInputProps) {
-  const [text, setText] = useState(String(value));
+  const toSol = (lamports: number) => lamports / LAMPORTS_PER_SOL;
+  const toLamports = (sol: number) => Math.round(sol * LAMPORTS_PER_SOL);
+  const fmtSol = (lamports: number) => {
+    const sol = toSol(lamports);
+    if (sol >= 1) return sol.toFixed(2);
+    if (sol >= 0.01) return sol.toFixed(2);
+    if (sol > 0) return sol.toFixed(4);
+    return '0';
+  };
 
-  useEffect(() => { setText(String(value)); }, [value]);
+  const [text, setText] = useState(fmtSol(value));
+
+  useEffect(() => { setText(fmtSol(value)); }, [value]);
 
   const commit = useCallback(() => {
-    const raw = text.replace(/\D/g, '');
-    const n = parseInt(raw, 10);
-    if (!isNaN(n) && raw.length > 0) {
-      const clamped = Math.round(Math.max(min, Math.min(max, n)) / 100) * 100;
+    const n = parseFloat(text);
+    if (!isNaN(n) && n > 0) {
+      const lamports = toLamports(n);
+      const clamped = Math.max(min, Math.min(max, lamports));
       onChange(clamped);
-      setText(String(clamped));
+      setText(fmtSol(clamped));
     } else {
-      setText(String(value));
+      setText(fmtSol(value));
     }
   }, [text, value, min, max, onChange]);
 
-  const current = (() => {
-    const raw = text.replace(/\D/g, '');
-    const n = parseInt(raw, 10);
-    return !isNaN(n) && raw.length > 0 ? n : value;
+  const currentLamports = (() => {
+    const n = parseFloat(text);
+    return !isNaN(n) && n > 0 ? toLamports(n) : value;
   })();
 
   const dec = useCallback(() => {
-    const step = Math.max(100, Math.round(current * 0.10));
-    const next = Math.round(Math.max(min, current - step) / 100) * 100;
-    onChange(next); setText(String(next));
-  }, [current, min, onChange]);
+    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
+    const next = Math.max(min, currentLamports - step);
+    onChange(next); setText(fmtSol(next));
+  }, [currentLamports, min, onChange]);
 
   const inc = useCallback(() => {
-    const step = Math.max(100, Math.round(current * 0.10));
-    const next = Math.round(Math.min(max, current + step) / 100) * 100;
-    onChange(next); setText(String(next));
-  }, [current, max, onChange]);
+    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
+    const next = Math.min(max, currentLamports + step);
+    onChange(next); setText(fmtSol(next));
+  }, [currentLamports, max, onChange]);
 
   return (
     <View style={riStyles.wrap}>
@@ -837,9 +914,9 @@ const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onCha
         <TextInput
           style={riStyles.input}
           value={text}
-          onChangeText={(t) => setText(t.replace(/\D/g, ''))}
+          onChangeText={(t) => setText(t.replace(/[^0-9.]/g, ''))}
           onBlur={commit} onSubmitEditing={commit}
-          keyboardType="number-pad" selectTextOnFocus showSoftInputOnFocus
+          keyboardType="decimal-pad" selectTextOnFocus showSoftInputOnFocus
         />
         <Pressable style={({ pressed }) => [riStyles.btn, pressed && riStyles.btnP]} onPress={inc} hitSlop={8}>
           <Image source={require('@/assets/images/btn-plus.png')} style={riStyles.icon} resizeMode="contain" />
@@ -929,7 +1006,8 @@ export default function TableScreen() {
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
   // Top bar: safe-area + 6 margin + ~52px bar = insets.top + 58
-  const TABLE_TOP = insets.top + 58;
+  let TABLE_TOP = insets.top ;
+  TABLE_TOP = TABLE_TOP + (TABLE_TOP * 0.18);
   // Bottom controls: raise input (~52) + action bar (~56) + padding (~80)
   const TABLE_BOT = 188;
   let TABLE_H = screenH - TABLE_BOT ;
@@ -938,12 +1016,12 @@ export default function TableScreen() {
   // Seat positions: absolute coords inside the main container
   // 0=top-center, 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right, 5=bottom-center
   const SEAT_POSITIONS = [
-    { top: TABLE_TOP + 15, left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.15), left: 4 }, // 1 top-left
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.15), right: 4 }, // 2 top-right
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.50), left: 4 }, // 3 bottom-left
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.50), right: 4 }, // 4 bottom-right
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.68), left: screenW / 2 - 32 }, // 5 bottom-center
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.03), left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.20), left: 4 }, // 1 top-left
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.20), right: 4 }, // 2 top-right
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.53), left: 4 }, // 3 bottom-left
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.53), right: 4 }, // 4 bottom-right
+    { top: TABLE_TOP + Math.round(TABLE_H * 0.70), left: screenW / 2 - 32 }, // 5 bottom-center
   ];
 
   // Granular store subscriptions – each selector is independent
@@ -957,6 +1035,7 @@ export default function TableScreen() {
   const isMyTurn = useGameStore((s) => s.isMyTurn);
   const mySeatIndex = useGameStore((s) => s.mySeatIndex);
   const activePlayerSeatIndex = useGameStore((s) => s.activePlayerSeatIndex);
+  const reservedSeats = useGameStore((s) => s.reservedSeats);
   const tablMinBuyIn = useGameStore((s) => s.minBuyIn);
   const tablMaxBuyIn = useGameStore((s) => s.maxBuyIn);
   const raiseAmount = useGameStore((s) => s.raiseAmount);
@@ -968,7 +1047,7 @@ export default function TableScreen() {
   // Must be before any early return (Rules of Hooks)
   const lobbyTables = useLobbyStore((s) => s.tables);
 
-  const { fold, call, raise, minRaise, maxRaise } = usePokerActions();
+  const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
   const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt));
 
   const { hideTransition } = useTransition();
@@ -977,6 +1056,18 @@ export default function TableScreen() {
     visible: false, seatIndex: 0,
   });
   const [leaveConfirmVisible, setLeaveConfirmVisible] = useState(false);
+  const [leavingInProgress, setLeavingInProgress] = useState(false);
+  const [cashOutAlert, setCashOutAlert] = useState<{ title: string; message: string } | null>(null);
+  const leftAlreadyRef = useRef(false);
+
+  // ── Auto-navigate away when kicked (busted out) ─────────────────────────
+  const kickedReason = useGameStore((s) => s.kickedReason);
+  useEffect(() => {
+    if (!kickedReason) return;
+    useGameStore.getState().clearKicked();
+    router.replace('/');
+  }, [kickedReason, router]);
+
 
   const onLayoutRoot = useCallback(async () => {
     if (fontsLoaded || fontError) {
@@ -992,11 +1083,11 @@ export default function TableScreen() {
     }
   }, [isMyTurn]);
 
-  // Always leave the room when this screen unmounts — covers both the Leave
-  // button press and swiping back without pressing Leave.
+  // Always leave the room when this screen unmounts — covers swiping back
+  // without pressing Leave. Skipped if confirmLeave already handled it.
   useEffect(() => {
     return () => {
-      if (id) SocketService.leaveTable(id);
+      if (id && !leftAlreadyRef.current) SocketService.leaveTable(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1007,9 +1098,46 @@ export default function TableScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const confirmLeave = useCallback(() => {
-    router.back(); // unmount triggers leaveTable via the cleanup useEffect above
-  }, [router]);
+  const confirmLeave = useCallback(async () => {
+    if (!id || leavingInProgress) return;
+    setLeaveConfirmVisible(false);
+    leftAlreadyRef.current = true;
+
+    // If the user is not seated, just leave immediately — no payout needed
+    if (mySeatIndex === null) {
+      SocketService.leaveTable(id);
+      router.back();
+      return;
+    }
+
+    setLeavingInProgress(true);
+
+    try {
+      const result = await SocketService.leaveTableWithPayout(id);
+      if (result && result.amount > 0) {
+        const sol = result.amount / 1_000_000_000;
+        const amtStr = sol >= 0.01 ? sol.toFixed(2) : sol.toFixed(4);
+        if (result.txSignature) {
+          setCashOutAlert({
+            title: 'CASH OUT COMPLETE',
+            message: `${amtStr} SOL has been transferred to your wallet.`,
+          });
+        } else {
+          setCashOutAlert({
+            title: 'CASH OUT FAILED',
+            message: `Transfer of ${amtStr} SOL failed. Please contact support.`,
+          });
+        }
+        // Don't navigate yet — wait for user to dismiss the alert
+        return;
+      }
+    } catch {
+      // Fall through — navigate immediately
+    }
+
+    setLeavingInProgress(false);
+    router.back();
+  }, [id, router, leavingInProgress, mySeatIndex]);
 
   const handleLeave = useCallback(() => {
     setLeaveConfirmVisible(true);
@@ -1032,12 +1160,20 @@ export default function TableScreen() {
     setBuyInModal((p) => ({ ...p, visible: false }));
   }, []);
 
-  const handleAction = useCallback((action: 'fold' | 'call' | 'raise') => {
+  const handleAction = useCallback((action: 'fold' | 'call' | 'raise' | 'all-in') => {
     if (!isMyTurn) return;
     if (action === 'fold') fold();
-    else if (action === 'call') call();
-    else raise(raiseAmount);
-  }, [isMyTurn, fold, call, raise, raiseAmount]);
+    else if (action === 'call') {
+      if (myChips <= 0) return;
+      call();
+    } else if (action === 'raise') {
+      if (myChips <= 0) return;
+      raise(raiseAmount);
+    } else if (action === 'all-in') {
+      if (myChips <= 0) return;
+      allIn();
+    }
+  }, [isMyTurn, fold, call, raise, allIn, raiseAmount, myChips]);
 
   // ── Loading gate ───────────────────────────────────────────────────────────
   // Only block rendering until fonts are loaded. The table renders immediately
@@ -1146,7 +1282,7 @@ export default function TableScreen() {
               );
             })}
           </View>
-          {pot > 0 && <Text style={styles.potLabel}>POT: {formatChips(pot)}</Text>}
+          {pot > 0 && phase !== 'preflop' && <Text style={styles.potLabel}>POT: {formatSol(pot)}</Text>}
 
           {/* Player's hole cards — shown below pot, only when in a hand */}
           {isInHand && mySeatIndex !== null && (
@@ -1170,7 +1306,9 @@ export default function TableScreen() {
 
       {/* Avatar slots — no rotation, seats stay at their clicked positions. */}
       {SEAT_POSITIONS.map((pos: object, v: number) => {
-        const seatOccupied = !!seats[v] || lobbyOccupiedSeats.includes(v);
+        const isReserved = reservedSeats.some(r => r.seatIndex === v);
+        const seatOccupied = !!seats[v] || lobbyOccupiedSeats.includes(v) || isReserved;
+        const reservation = reservedSeats.find(r => r.seatIndex === v);
         return (
           <View key={v} style={[styles.seatWrap, pos]}>
             <SeatSlot
@@ -1179,7 +1317,8 @@ export default function TableScreen() {
               isActive={activePlayerSeatIndex === v}
               timerProgress={activePlayerSeatIndex === v ? progress : 1}
               canJoin={canJoinAnySeat && !seatOccupied}
-              isTaken={!seats[v] && lobbyOccupiedSeats.includes(v)}
+              isTaken={!seats[v] && (lobbyOccupiedSeats.includes(v) || isReserved)}
+              reservation={reservation}
               onJoin={handleSeatPress}
             />
           </View>
@@ -1188,30 +1327,19 @@ export default function TableScreen() {
 
       {/* Top bar */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        <ImageBackground source={require('@/assets/images/topbar-bg.png')} style={styles.topBar} resizeMode="stretch">
-          <Image source={require('@/assets/images/coin.png')} style={styles.coinIcon} resizeMode="contain" />
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLabel}>BALANCE: </Text>
-            <Text style={styles.balanceValue} numberOfLines={1}>{formatChips(myChips)}</Text>
+        {isMyTurn && (
+          <View style={[styles.turnTimerWrap, secondsLeft <= 5 && styles.turnTimerWrapUrgent]}>
+            <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
+              {secondsLeft}s
+            </Text>
           </View>
-          <View style={styles.flex1} />
-          <Text style={styles.roomChip} numberOfLines={1}>{roomId}</Text>
-        </ImageBackground>
+        )}
         <Pressable
           style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnP]}
           onPress={handleLeave}>
           <Text style={styles.leaveText}>LEAVE</Text>
         </Pressable>
       </View>
-
-      {/* Turn countdown — absolute, floats below the top bar on the right */}
-      {isMyTurn && (
-        <View style={[styles.turnTimerWrap, { top: insets.top + 66 }]}>
-          <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
-            {secondsLeft}s
-          </Text>
-        </View>
-      )}
 
       {/* Leave confirmation modal */}
       <Modal
@@ -1222,7 +1350,7 @@ export default function TableScreen() {
         <View style={lcStyles.overlay}>
           <View style={lcStyles.panel}>
             <Text style={lcStyles.title}>LEAVE GAME?</Text>
-            <Text style={lcStyles.sub}>You will forfeit your seat and any chips in play.</Text>
+            <Text style={lcStyles.sub}>Your remaining balance will be transferred back to your wallet.</Text>
             <Pressable
               style={({ pressed }) => [lcStyles.confirmBtn, pressed && lcStyles.btnPressed]}
               onPress={confirmLeave}>
@@ -1236,6 +1364,30 @@ export default function TableScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Leaving / payout in progress overlay */}
+      {leavingInProgress && !cashOutAlert && (
+        <Modal visible transparent animationType="fade">
+          <View style={lcStyles.overlay}>
+            <View style={lcStyles.panel}>
+              <Text style={lcStyles.title}>CASHING OUT...</Text>
+              <Text style={lcStyles.sub}>Transferring your balance back to your wallet.</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Cash-out result alert */}
+      <GameAlert
+        visible={cashOutAlert !== null}
+        title={cashOutAlert?.title ?? ''}
+        message={cashOutAlert?.message ?? ''}
+        onClose={() => {
+          setCashOutAlert(null);
+          setLeavingInProgress(false);
+          router.back();
+        }}
+      />
 
       {/* Action bar — only when seated */}
       {mySeatIndex !== null && (
@@ -1253,48 +1405,11 @@ export default function TableScreen() {
                 />
               </View>
 
-              <View style={styles.actionBar}>
-                {/* FOLD */}
-                <Pressable
-                  style={({ pressed }) => [styles.actionBtn, styles.foldWrap, pressed && styles.actionBtnP]}
-                  onPress={() => handleAction('fold')}>
-                  {({ pressed }) => (
-                    <ImageBackground
-                      source={pressed ? require('@/assets/images/buttons/fold-btn-pressed.png') : require('@/assets/images/buttons/fold-btn.png')}
-                      style={styles.btnBg} resizeMode="stretch">
-                      <Text style={styles.btnText}>FOLD</Text>
-                    </ImageBackground>
-                  )}
-                </Pressable>
-
-                {/* CALL / CHECK */}
-                <Pressable
-                  style={({ pressed }) => [styles.actionBtn, styles.callWrap, pressed && styles.actionBtnP]}
-                  onPress={() => handleAction('call')}>
-                  {({ pressed }) => (
-                    <ImageBackground
-                      source={pressed ? require('@/assets/images/buttons/call-btn-pressed.png') : require('@/assets/images/buttons/call-btn.png')}
-                      style={styles.btnBg} resizeMode="stretch">
-                      <Text style={styles.btnText}>
-                        {currentBet > 0 ? `CALL ${formatChips(currentBet)}` : 'CHECK'}
-                      </Text>
-                    </ImageBackground>
-                  )}
-                </Pressable>
-
-                {/* RAISE */}
-                <Pressable
-                  style={({ pressed }) => [styles.actionBtn, styles.raiseWrap, pressed && styles.actionBtnP]}
-                  onPress={() => handleAction('raise')}>
-                  {({ pressed }) => (
-                    <ImageBackground
-                      source={pressed ? require('@/assets/images/buttons/raise-btn-pressed.png') : require('@/assets/images/buttons/raise-btn.png')}
-                      style={styles.btnBg} resizeMode="stretch">
-                      <Text style={styles.raiseBtnText}>RAISE</Text>
-                    </ImageBackground>
-                  )}
-                </Pressable>
-              </View>
+              <GameActionButtons
+                currentBet={currentBet}
+                myChips={myChips}
+                onAction={handleAction}
+              />
             </>
           )}
         </View>
@@ -1345,11 +1460,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   topBar: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, overflow: 'hidden' },
-  balanceRow: { marginStart: 6, marginTop: 5, flexDirection: 'row', alignItems: 'center', flexShrink: 0 },
   flex1: { flex: 1, minWidth: 6 },
-  coinIcon: { width: 22, height: 22, marginRight: 4, marginVertical: 6, marginStart: 34 },
-  balanceLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: 'rgba(255,245,220,0.8)' },
-  balanceValue: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: '#FFF8E8', flex: 1 },
   roomChip: {
     fontFamily: 'PressStart2P_400Regular', fontSize: 6,
     color: 'rgba(255,255,255,0.5)', marginEnd: 10,
@@ -1364,13 +1475,14 @@ const styles = StyleSheet.create({
   timerTextUrgent: { color: '#FF4444' },
   leaveBtn: {
     paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 'auto',
     paddingHorizontal: 14,
     backgroundColor: 'rgba(180,30,30,0.92)',
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: '#FF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
     ...Platform.select({
       ios: { shadowColor: '#FF0000', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.45, shadowRadius: 6 },
       android: { elevation: 6 },
@@ -1388,13 +1500,17 @@ const styles = StyleSheet.create({
   // Bottom controls
   bottomControls: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, zIndex: 10 },
   turnTimerWrap: {
-    position: 'absolute', right: 16, zIndex: 30,
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 10, borderWidth: 1.5, borderColor: '#00FF88',
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 10, paddingVertical: 6,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  turnTimerWrapUrgent: {
+    borderColor: '#FF4444',
   },
   turnTimerText: {
     fontFamily: 'PressStart2P_400Regular', fontSize: 18, color: '#00FF88',
+    marginTop: 6,
     textShadowColor: '#00FF88', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10,
   },
   turnTimerUrgent: {
@@ -1404,34 +1520,6 @@ const styles = StyleSheet.create({
   holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
   holeCard: { width: 52, height: 74 },
   raiseRow: { flexDirection: 'row', marginBottom: 12, paddingHorizontal: 4 },
-  actionBar: { flexDirection: 'row', gap: 8, paddingHorizontal: 4 },
-  actionBtn: {
-    flex: 1, minHeight: 48,
-    borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 1, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
-      android: { elevation: 4 }, default: {},
-    }),
-  },
-  actionBtnP: { opacity: 0.85 },
-  actionBtnOff: { opacity: 0.35 },
-  foldWrap: { overflow: 'hidden' },
-  callWrap: { overflow: 'hidden' },
-  raiseWrap: {
-    overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,220,100,0.75)',
-    ...Platform.select({
-      ios: { shadowColor: '#FFD060', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.45, shadowRadius: 6 },
-      android: { elevation: 8 }, default: {},
-    }),
-  },
-  btnBg: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
-  btnText: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff' },
-  btnTextOff: { opacity: 0.4 },
-  raiseBtnText: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff',
-    textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
-  },
 });
 
 // Leave-confirmation modal styles

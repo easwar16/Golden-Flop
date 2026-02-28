@@ -182,6 +182,9 @@ export function processAction(
     }
 
     case 'call': {
+      if (s.players[playerIndex].chips <= 0) {
+        throw new Error('Cannot call with zero balance');
+      }
       const toCall = Math.min(
         s.currentBet - s.players[playerIndex].currentBet,
         s.players[playerIndex].chips,
@@ -193,6 +196,9 @@ export function processAction(
     }
 
     case 'raise': {
+      if (s.players[playerIndex].chips <= 0) {
+        throw new Error('Cannot raise with zero balance');
+      }
       if (raiseAmount === undefined) throw new Error('raise requires an amount');
       const minRaise = calcMinRaise(s);
       const maxRaise = s.players[playerIndex].chips;
@@ -213,6 +219,9 @@ export function processAction(
     }
 
     case 'all-in': {
+      if (s.players[playerIndex].chips <= 0) {
+        throw new Error('Cannot go all-in with zero balance');
+      }
       const allInAmount = s.players[playerIndex].chips;
       amount = allInAmount;
       const isRaise = allInAmount + s.players[playerIndex].currentBet > s.currentBet;

@@ -26,6 +26,7 @@ import { processBuyIn, processCashOut } from '../balance/BalanceService';
 import { verifySOLDepositToVault } from '../solana/SolanaService';
 import { processPlayerCashOut } from '../solana/PayoutService';
 import { prisma } from '../db/prisma';
+import { findOrCreateUser } from '../services/user.service';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -154,6 +155,32 @@ export function registerSocketHandlers(
       }
     });
 
+    // ── Reserve seat (pre-wallet-tx lock) ──────────────────────────────────
+
+    socket.on('reserve_seat', (payload, ack) => {
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) {
+        ack?.({ error: 'Table not found' });
+        return;
+      }
+      const err = room.reserveSeat(playerId, playerName, avatarSeed, payload.seatIndex);
+      if (err) {
+        ack?.({ error: err });
+      } else {
+        ack?.({ ok: true });
+        roomManager.broadcastLobby();
+      }
+    });
+
+    // ── Release seat reservation ───────────────────────────────────────────
+
+    socket.on('release_seat', (payload) => {
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) return;
+      room.releaseReservation(payload.seatIndex, playerId);
+      roomManager.broadcastLobby();
+    });
+
     // ── Sit at specific seat (predefined tables) ──────────────────────────
     //
     // Identical to join_table but lets the player choose their seat index.
@@ -186,10 +213,12 @@ export function registerSocketHandlers(
         }
 
         const txSignature = (payload as any).txSignature as string | undefined;
+        const payloadWallet = (payload as any).walletAddress as string | undefined;
         let isVaultPlayer = false;
         let walletAddress: string | null = null;
+        let vaultUserId: string | null = null;
 
-        if (txSignature && userId) {
+        if (txSignature && payloadWallet) {
           // ── Vault flow: verify on-chain deposit to room vault ─────────
           const dbRoom = await prisma.room.findUnique({
             where: { id: payload.tableId },
@@ -201,20 +230,18 @@ export function registerSocketHandlers(
             return;
           }
 
-          // Get wallet address from JWT payload
-          const jwtPayload = extractSocketUser(token);
-          walletAddress = jwtPayload?.walletAddress ?? null;
-          if (!walletAddress) {
-            ack?.({ error: 'Wallet address not found in auth token' });
-            return;
-          }
+          walletAddress = payloadWallet;
+
+          // Resolve user by wallet address (create if first time)
+          const vaultUser = await findOrCreateUser(walletAddress);
+          vaultUserId = vaultUser.id;
 
           // Idempotency: check if this tx was already used
           const existingDeposit = await prisma.deposit.findUnique({
             where: { transactionSignature: txSignature },
           });
           if (existingDeposit) {
-            if (existingDeposit.userId !== userId) {
+            if (existingDeposit.userId !== vaultUserId) {
               ack?.({ error: 'Transaction already claimed by another user' });
               return;
             }
@@ -236,7 +263,7 @@ export function registerSocketHandlers(
             // Record deposit
             await prisma.deposit.create({
               data: {
-                userId,
+                userId: vaultUserId,
                 tokenType: 'SOL',
                 amount: verification.confirmedAmount!,
                 transactionSignature: txSignature,
@@ -256,6 +283,10 @@ export function registerSocketHandlers(
         }
         // else: guest mode — no balance checks
 
+        // For vault players, use the DB userId resolved from wallet address
+        // (not the JWT userId which may be null for mobile wallet-only users)
+        const effectiveUserId = isVaultPlayer ? vaultUserId : userId;
+
         const err = room.join(
           socket,
           playerId,
@@ -263,7 +294,7 @@ export function registerSocketHandlers(
           payload.avatarSeed ?? avatarSeed,
           payload.buyIn,
           payload.seatIndex,
-          { userId, walletAddress, isVaultPlayer },
+          { userId: effectiveUserId, walletAddress, isVaultPlayer },
         );
         if (err) {
           // Refund internal balance if join fails (vault deposits are already on-chain)
@@ -291,34 +322,55 @@ export function registerSocketHandlers(
       const room = roomManager.getRoom(payload.tableId);
       if (!room) return;
 
+      // Capture seat data BEFORE removing the player from the room
       const seat = room.getPlayerById(playerId);
-      if (seat && seat.chips > 0) {
-        if (seat.isVaultPlayer && seat.walletAddress && seat.userId) {
-          // ── Vault flow: transfer from vault to player's wallet on-chain ──
-          void processPlayerCashOut(
-            payload.tableId,
-            seat.userId,
-            seat.walletAddress,
-            BigInt(seat.chips),
-          ).then(sig => {
-            if (sig) {
-              console.log(`[economy] vault cash-out: ${seat.chips} lamports → ${seat.walletAddress} (tx: ${sig})`);
-            } else {
-              console.error(`[economy] vault cash-out FAILED for ${seat.walletAddress}, ${seat.chips} lamports`);
-            }
-          });
-        } else if (userId) {
-          // ── Internal balance flow (existing) ──
-          await processCashOut(userId, BigInt(seat.chips));
-          console.log(`[economy] cashed out ${seat.chips} chips → userId:${userId}`);
-        }
-      }
+      const cashOutAmount = seat?.chips ?? 0;
+      const seatWallet = seat?.walletAddress ?? null;
+      const seatUserId = seat?.userId ?? null;
+      const seatIsVault = seat?.isVaultPlayer ?? false;
 
+      // Remove player from the room immediately — don't block on payout
       room.leave(socket.id);
       socket.leave(payload.tableId);
       socket.data.currentTableId = null;
       roomManager.broadcastLobby();
       console.log(`[room] ${playerId} left ${payload.tableId}`);
+
+      // Process payout after the player has been removed
+      if (cashOutAmount > 0) {
+        if (seatIsVault && seatWallet && seatUserId) {
+          // ── Vault flow: transfer from vault to player's wallet on-chain ──
+          try {
+            const sig = await processPlayerCashOut(
+              payload.tableId,
+              seatUserId,
+              seatWallet,
+              BigInt(cashOutAmount),
+            );
+            socket.emit('cash_out_complete', {
+              tableId: payload.tableId,
+              amount: cashOutAmount,
+              txSignature: sig,
+            });
+            if (sig) {
+              console.log(`[economy] vault cash-out: ${cashOutAmount} lamports → ${seatWallet} (tx: ${sig})`);
+            } else {
+              console.error(`[economy] vault cash-out FAILED for ${seatWallet}, ${cashOutAmount} lamports`);
+            }
+          } catch (err) {
+            console.error(`[economy] vault cash-out error:`, err);
+            socket.emit('cash_out_complete', {
+              tableId: payload.tableId,
+              amount: cashOutAmount,
+              txSignature: null,
+            });
+          }
+        } else if (userId) {
+          // ── Internal balance flow (existing) ──
+          await processCashOut(userId, BigInt(cashOutAmount));
+          console.log(`[economy] cashed out ${cashOutAmount} chips → userId:${userId}`);
+        }
+      }
     });
 
     // ── Watch table (spectator — gets public table_state, no hole cards) ──
@@ -329,7 +381,9 @@ export function registerSocketHandlers(
       socket.join(payload.tableId);
       socket.data.currentTableId = payload.tableId;
       console.log(`[watch_table] ${socket.id} joined room ${payload.tableId}`);
-      socket.emit('table_state', room.buildStateFor(null));
+      // If this socket is a seated player, send personalized state (with mySeatIndex)
+      const seatedPlayer = room.getPlayerBySocketId(socket.id);
+      socket.emit('table_state', room.buildStateFor(seatedPlayer?.id ?? null));
     });
 
     // ── Player action ─────────────────────────────────────────────────────
@@ -353,7 +407,10 @@ export function registerSocketHandlers(
     // ── Disconnect ────────────────────────────────────────────────────────
 
     socket.on('disconnect', (reason) => {
-      console.log(`[socket] disconnected: ${socket.id} reason: ${reason}`);
+      console.log(`[socket] disconnected: ${socket.id} (player: ${playerId}) reason: ${reason}`);
+      // Don't release seat reservations on disconnect — the player may have
+      // switched to their wallet app (backgrounding the socket). Let the
+      // server-side timeout handle expiry instead.
       roomManager.handleDisconnect(socket.id);
     });
   });

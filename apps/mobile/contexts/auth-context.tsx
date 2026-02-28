@@ -46,8 +46,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  /** Full SIWS flow: nonce → sign → verify → store JWT */
-  signIn: () => Promise<void>;
+  /** Full SIWS flow: nonce → sign → verify → store JWT. Returns the JWT on success. */
+  signIn: () => Promise<string | null>;
   /** Clear JWT and user state */
   signOut: () => Promise<void>;
   /** Refresh balance and user profile from server */
@@ -92,13 +92,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── signIn ──────────────────────────────────────────────────────────────
 
-  const signIn = useCallback(async () => {
+  const signIn = useCallback(async (): Promise<string | null> => {
     setError(null);
 
     const account = accounts?.[0];
     if (!account) {
       setError('Wallet not connected. Tap "Connect Wallet" first.');
-      return;
+      return null;
     }
 
     // Convert Uint8Array wallet address → base58 string
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       walletAddress = new PublicKey(account.address).toBase58();
     } catch {
       setError('Invalid wallet address format');
-      return;
+      return null;
     }
 
     setIsLoading(true);
@@ -132,9 +132,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 5. Fetch balance
       const { balance: bal } = await fetchMe(jwt);
       setBalance(bal);
+
+      return jwt;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
+      return null;
     } finally {
       setIsLoading(false);
     }

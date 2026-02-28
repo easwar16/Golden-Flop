@@ -19,6 +19,7 @@ export interface LobbyTable {
   maxPlayers: number;
   phase: string;
   occupiedSeats: number[];
+  reservedSeats?: number[];
 }
 
 interface LobbyState {

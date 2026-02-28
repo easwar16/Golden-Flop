@@ -82,6 +82,10 @@ export class RoomManager {
     return [...this.rooms.values()].map(r => r.toTableInfo());
   }
 
+  getAllRooms(): Room[] {
+    return [...this.rooms.values()];
+  }
+
   // ─── Socket routing ───────────────────────────────────────────────────────
 
   /** Find which room (if any) this socket is in. */
@@ -96,41 +100,15 @@ export class RoomManager {
     const room = this.getRoomForSocket(socketId);
     if (!room) return;
 
-    // Mark player as disconnected but keep their seat for reconnection window
-    for (const [, player] of room['seats']) {
-      if (player.socketId === socketId) {
-        player.isConnected = false;
-        break;
-      }
+    // Immediately remove the player from the room on disconnect
+    room.leave(socketId);
+
+    // Only destroy non-persistent (dynamic) rooms when they become empty
+    if (room.playerCount === 0 && !room.isPersistent) {
+      this.deleteRoom(room.id);
     }
 
-    room.broadcastState();
-
-    // If only 1 player remains, cancel any in-progress countdown immediately
-    if (room.playerCount < 2) {
-      room['clearCountdown']?.();
-    }
-
-    // Broadcast updated lobby so the disconnect is immediately reflected
     this.broadcastLobby();
-
-    // Grace period: if player doesn't reconnect within 60s, remove them
-    setTimeout(() => {
-      const roomStillExists = this.rooms.get(room.id);
-      if (!roomStillExists) return;
-      for (const [, player] of room['seats']) {
-        if (player.socketId === socketId && !player.isConnected) {
-          room.leave(socketId);
-          break;
-        }
-      }
-      // Only destroy non-persistent (dynamic) rooms when they become empty
-      if (room.playerCount === 0 && !room.isPersistent) {
-        this.deleteRoom(room.id);
-      }
-      // Broadcast updated lobby after the grace-period removal
-      this.broadcastLobby();
-    }, 60_000);
   }
 
   // ─── Lobby broadcast ──────────────────────────────────────────────────────

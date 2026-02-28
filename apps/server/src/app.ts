@@ -16,6 +16,7 @@ import { authRouter } from './auth/authRoutes';
 import { depositRouter } from './deposit/depositRoutes';
 import { vaultDepositRouter } from './deposit/vaultDepositRoutes';
 import { withdrawalRouter } from './withdrawal/withdrawalRoutes';
+import { adminRouter } from './admin/adminRoutes';
 import { generalLimiter } from './middleware/rateLimiter';
 import { syncFromDefinitions } from './services/room.service';
 
@@ -54,6 +55,7 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
   app.use('/api/deposit',    depositRouter);
   app.use('/api/vault',      vaultDepositRouter);
   app.use('/api/withdrawal', withdrawalRouter);
+  app.use('/api/admin',      adminRouter);
 
   const httpServer = createServer(app);
   const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(

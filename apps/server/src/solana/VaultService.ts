@@ -91,10 +91,12 @@ export function getOrCreateVaultAddress(roomId: string): string {
 }
 
 /**
- * Check whether vault keys are configured (at least VAULT_PRIVATE_KEY).
+ * Check whether any vault keys are configured (shared or per-room).
  */
 export function isVaultConfigured(): boolean {
-  return !!process.env.VAULT_PRIVATE_KEY;
+  if (process.env.VAULT_PRIVATE_KEY) return true;
+  // Check for any per-room VAULT_KEY_* env vars
+  return Object.keys(process.env).some(k => k.startsWith('VAULT_KEY_'));
 }
 
 /**

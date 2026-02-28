@@ -38,7 +38,9 @@ import { SocketService } from '@/services/SocketService';
 import { useLobbyStore, LobbyTable } from '@/stores/useLobbyStore';
 import { getPlayerName } from '@/utils/player-identity';
 import { useWallet } from '@/contexts/wallet-context';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { useAuth } from '@/contexts/auth-context';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, clusterApiUrl } from '@solana/web3.js';
+import { SOLANA_NETWORK } from '@/constants/solana';
 
 const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList) as typeof FlatList;
 
@@ -51,10 +53,11 @@ const CARD_GAP = 14;
 type Tier = { label: string; accentColor: string; borderColor: string; shadowColor: string; isVip: boolean };
 
 function getTier(bigBlind: number): Tier {
-  if (bigBlind <= 20)  return { label: 'LOW',  accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',  shadowColor: '#00FFFF', isVip: false };
-  if (bigBlind <= 100) return { label: 'MID',  accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',  shadowColor: '#FFD700', isVip: false };
-  if (bigBlind <= 500) return { label: 'HIGH', accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)', shadowColor: '#FF3B6F', isVip: false };
-  return                      { label: 'VIP',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)', shadowColor: '#BF5FFF', isVip: true  };
+  const bb = bigBlind / LAMPORTS_PER_SOL;
+  if (bb <= 0.001)  return { label: 'LOW',  accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',  shadowColor: '#00FFFF', isVip: false };
+  if (bb <= 0.005)  return { label: 'MID',  accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',  shadowColor: '#FFD700', isVip: false };
+  if (bb <= 0.02)   return { label: 'HIGH', accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)', shadowColor: '#FF3B6F', isVip: false };
+  return                     { label: 'VIP',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)', shadowColor: '#BF5FFF', isVip: true  };
 }
 
 // ─── Table name per tier ──────────────────────────────────────────────────────
@@ -94,15 +97,16 @@ function getTableBadge(t: LobbyTable, allTables: LobbyTable[]): TableBadge {
   const maxPlayers = Math.max(...allTables.map((x) => x.playerCount));
   if (t.playerCount >= 4 && t.playerCount === maxPlayers && allTables.length > 1) return { text: '🔥 POPULAR', color: '#FF6B35' };
   if (t.playerCount === 0) return { text: '🆕 NEW', color: '#22c55e' };
-  if (t.playerCount >= 2 && ratio < 0.67 && t.bigBlind <= 100) return { text: '⭐ REC', color: '#FFD700' };
+  if (t.playerCount >= 2 && ratio < 0.67 && t.bigBlind / LAMPORTS_PER_SOL <= 0.005) return { text: '⭐ REC', color: '#FFD700' };
   return null;
 }
 
 // ─── Table speed ──────────────────────────────────────────────────────────────
 
 function getTableSpeed(bigBlind: number): string {
-  if (bigBlind <= 10) return 'SLOW';
-  if (bigBlind <= 50) return 'NORMAL';
+  const bb = bigBlind / LAMPORTS_PER_SOL;
+  if (bb <= 0.001) return 'SLOW';
+  if (bb <= 0.005) return 'NORMAL';
   return 'FAST';
 }
 
@@ -509,7 +513,7 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
             </View>
 
             <Text style={styles.tableDetail}>
-              Blinds: {(t.smallBlind / 200).toFixed(2)} / {(t.bigBlind / 200).toFixed(2)} SOL
+              Blinds: {(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / {(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL
             </Text>
 
             <View style={styles.tableRow}>
@@ -519,7 +523,7 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </Text>
             </View>
 
-            <Text style={styles.tableDetail}>Min buy-in: {(t.minBuyIn / 100).toFixed(0)} SOL</Text>
+            <Text style={styles.tableDetail}>Min buy-in: {(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL</Text>
 
             {/* Expanded details */}
             {expanded && (
@@ -598,7 +602,8 @@ type DisplayRow = { t: LobbyTable; name: string; tier: Tier };
 
 export default function LobbyScreen() {
   const tables = useLobbyStore((s) => s.tables);
-  const { accounts } = useWallet();
+  const { accounts, deauthorize } = useWallet();
+  const { signOut } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'SOLANA' | 'PRACTICE'>('SOLANA');
@@ -651,23 +656,29 @@ export default function LobbyScreen() {
   isWalletConnectedRef.current = isWalletConnected;
   const rawAddress = accounts?.[0]?.address;
   const shortAddress = rawAddress != null ? truncateAddress(rawAddress) : null;
+  // Stable string key so useEffect doesn't re-fire every render (rawAddress is a Uint8Array)
+  const addressBase58 = rawAddress != null ? new PublicKey(rawAddress).toBase58() : null;
 
   const [solBalance, setSolBalance] = useState<string | null>(null);
   useEffect(() => {
-    if (!rawAddress) { setSolBalance(null); return; }
+    if (!addressBase58) { setSolBalance(null); return; }
     let cancelled = false;
     (async () => {
       try {
-        const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-        const pubkey = new PublicKey(rawAddress);
+        const connection = new Connection(clusterApiUrl(SOLANA_NETWORK), 'confirmed');
+        const pubkey = new PublicKey(addressBase58);
         const lamports = await connection.getBalance(pubkey);
         if (!cancelled) setSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(2) + ' SOL');
       } catch {
-        if (!cancelled) setSolBalance('-- SOL');
+        if (cancelled) return;
+        // Balance unreachable — disconnect wallet and clear session
+        setSolBalance(null);
+        deauthorize().catch(() => {});
+        signOut().catch(() => {});
       }
     })();
     return () => { cancelled = true; };
-  }, [rawAddress]);
+  }, [addressBase58, deauthorize, signOut]);
 
   // Table names are computed once per render cycle; reset counter first
   const tableNames = useMemo(() => {
@@ -814,10 +825,10 @@ export default function LobbyScreen() {
               <Text style={[styles.walletStatusText, { color: '#22c55e' }]}>{solBalance ?? '…'}</Text>
             </View>
           ) : (
-            <View style={[styles.walletBadge, styles.walletBadgeDisconnected, { flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }]}>
+            <Pressable onPress={promptConnectWallet} style={[styles.walletBadge, styles.walletBadgeDisconnected, { flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }]}>
               <View style={[styles.walletDot, { backgroundColor: '#FF3B3B', marginBottom: 4 }]} />
               <Text style={[styles.walletStatusText, { color: '#FF6B6B' }]}>NOT{'\n'}CONNECTED</Text>
-            </View>
+            </Pressable>
           )}
         </View>
 
