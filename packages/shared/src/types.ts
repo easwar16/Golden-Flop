@@ -50,6 +50,7 @@ export interface SeatView {
   seatIndex: number;
   playerId: string;
   name: string;
+  avatarSeed: string;
   chips: number;
   isDealer: boolean;
   isSmallBlind: boolean;

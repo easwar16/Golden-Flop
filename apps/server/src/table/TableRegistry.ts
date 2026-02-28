@@ -96,6 +96,7 @@ export class TableRegistry {
         id: p.id,
         socketId: '',         // stale after restart; reconnect updates this
         name: p.name,
+        avatarSeed: p.id,    // fallback: player will send true seed on reconnect
         chips: p.chips,
         seatIndex: p.seatIndex,
         isConnected: false,   // treated as disconnected until they reconnect
