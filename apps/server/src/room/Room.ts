@@ -35,8 +35,11 @@ import {
   autoFold,
   calcMinRaise,
   activePlayer,
+  applyRake,
 } from '../engine/GameEngine';
 import { savePlayers } from '../redis/TableStore';
+import { recordHandResult } from '../services/game.service';
+import { getRoom as getRoomConfig } from '../services/room.service';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -51,9 +54,16 @@ export interface RoomPlayer {
   id: string;
   socketId: string;
   name: string;
+  avatarSeed: string;
   chips: number;
   seatIndex: number;
   isConnected: boolean;
+  /** Database user ID — null for guests. */
+  userId?: string | null;
+  /** Base58 wallet address — set when player joins via vault deposit. */
+  walletAddress?: string | null;
+  /** Whether this player joined via on-chain vault deposit (vs internal balance). */
+  isVaultPlayer?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,6 +146,23 @@ export class Room {
     };
   }
 
+  /**
+   * Get a seated player by their player ID.
+   * Useful for external services (SocketHandler) to inspect player state.
+   */
+  getPlayerById(playerId: string): RoomPlayer | undefined {
+    return [...this.seats.values()].find(p => p.id === playerId);
+  }
+
+  /**
+   * Get a seated player by their socket ID.
+   */
+  getPlayerBySocketId(socketId: string): RoomPlayer | undefined {
+    const seatIndex = this.socketToSeat.get(socketId);
+    if (seatIndex === undefined) return undefined;
+    return this.seats.get(seatIndex);
+  }
+
   // ─── Join / Leave / Reconnect ─────────────────────────────────────────────
 
   /**
@@ -149,8 +176,10 @@ export class Room {
     socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
     playerId: string,
     playerName: string,
+    avatarSeed: string,
     buyIn: number,
     preferredSeat?: number,
+    opts?: { userId?: string | null; walletAddress?: string | null; isVaultPlayer?: boolean },
   ): string | null {
     if (this.seats.size >= this.config.maxPlayers) return 'Table is full';
     if (buyIn < this.config.minBuyIn) return `Minimum buy-in is ${this.config.minBuyIn}`;
@@ -188,9 +217,13 @@ export class Room {
       id: playerId,
       socketId: socket.id,
       name: playerName,
+      avatarSeed,
       chips: buyIn,
       seatIndex,
       isConnected: true,
+      userId: opts?.userId ?? null,
+      walletAddress: opts?.walletAddress ?? null,
+      isVaultPlayer: opts?.isVaultPlayer ?? false,
     };
 
     this.seats.set(seatIndex, player);
@@ -209,8 +242,8 @@ export class Room {
       chips: buyIn,
     });
 
-    // Send current state to the new player
-    this.emitStateTo(socket);
+    // Broadcast updated state to all seated players + observers in the room
+    this.broadcastState();
 
     // Start countdown when second player joins (if no hand running + not already counting)
     if (this.seats.size >= 2 && !this.handState && !this.countdownTimer) {
@@ -447,16 +480,73 @@ export class Room {
     const result = resolveShowdown(handState);
     result.tableId = this.id;
 
+    // ── Rake calculation ────────────────────────────────────────────────────
+    let rakeAmount = 0;
+    const roomConfig = await getRoomConfig(this.id).catch(() => null);
+    const rakePercentage = roomConfig?.rakePercentage ?? 0;
+    const rakeCap = Number(roomConfig?.rakeCap ?? 0);
+    const totalPot = handState.pot;
+
+    if (rakePercentage > 0 && result.allPlayers.some(p => p.winAmount > 0)) {
+      const { rakeAmount: rake } = applyRake(totalPot, rakePercentage, rakeCap);
+      rakeAmount = rake;
+
+      // Deduct rake proportionally from winners
+      if (rakeAmount > 0) {
+        const winners = result.allPlayers.filter(p => p.winAmount > 0);
+        const totalWinnings = winners.reduce((sum, w) => sum + w.winAmount, 0);
+        let rakeRemaining = rakeAmount;
+
+        for (const winner of winners) {
+          const share = Math.floor(rakeAmount * (winner.winAmount / totalWinnings));
+          const deduction = Math.min(share, winner.winAmount, rakeRemaining);
+          winner.winAmount -= deduction;
+          rakeRemaining -= deduction;
+        }
+        // Distribute remainder from first winner
+        if (rakeRemaining > 0 && winners.length > 0) {
+          const deduction = Math.min(rakeRemaining, winners[0].winAmount);
+          winners[0].winAmount -= deduction;
+        }
+      }
+    }
+
     // Apply chip changes back to seats
+    const playerResults = [];
     for (const r of result.allPlayers) {
       const seat = [...this.seats.values()].find(p => p.id === r.playerId);
       if (seat) {
         const ep = handState.players.find(p => p.id === r.playerId);
-        if (ep) seat.chips = ep.chips + r.winAmount;
+        if (ep) {
+          const startChips = ep.chips + ep.totalContributed;
+          seat.chips = ep.chips + r.winAmount;
+          playerResults.push({
+            playerId: r.playerId,
+            name: r.name,
+            seatIndex: r.seatIndex,
+            startChips,
+            endChips: seat.chips,
+            winAmount: r.winAmount,
+          });
+        }
       }
     }
 
     this.io.to(this.id).emit('hand_result', result);
+
+    // ── Persist game result to PostgreSQL (fire-and-forget) ─────────────────
+    const firstWinner = result.allPlayers.find(p => p.winAmount > 0);
+    if (firstWinner) {
+      void recordHandResult({
+        handId:     handState.handId,
+        tableId:    this.id,
+        roomId:     this.id,  // For predefined tables, room ID = table ID
+        winnerId:   firstWinner.playerId,
+        potSize:    totalPot,
+        rakeAmount,
+        players:    playerResults,
+      });
+    }
 
     this.handState = null;
     this.broadcastState();
@@ -568,12 +658,31 @@ export class Room {
 
   // ─── State broadcasting ───────────────────────────────────────────────────
 
-  /** Broadcast individualised state to every connected player. */
+  /** Broadcast individualised state to every connected player and public state to observers. */
   broadcastState(): void {
+    const seatedSocketIds = new Set<string>();
+
     for (const player of this.seats.values()) {
       if (!player.isConnected) continue;
       const socket = this.io.sockets.sockets.get(player.socketId);
-      if (socket) this.emitStateTo(socket);
+      if (socket) {
+        this.emitStateTo(socket);
+        seatedSocketIds.add(player.socketId);
+      }
+    }
+
+    // Send public state (no hole cards) to observer sockets in the room
+    const publicState = this.buildStateFor(null);
+    const roomSockets = this.io.sockets.adapter.rooms.get(this.id);
+    console.log(`[broadcastState] room=${this.id} roomSockets=${roomSockets?.size ?? 0} seated=${seatedSocketIds.size}`);
+    if (roomSockets) {
+      for (const socketId of roomSockets) {
+        if (!seatedSocketIds.has(socketId)) {
+          const socket = this.io.sockets.sockets.get(socketId);
+          console.log(`[broadcastState] sending to observer ${socketId} found=${!!socket}`);
+          socket?.emit('table_state', publicState);
+        }
+      }
     }
   }
 
@@ -614,6 +723,7 @@ export class Room {
           seatIndex: i,
           playerId: roomPlayer.id,
           name: roomPlayer.name,
+          avatarSeed: roomPlayer.avatarSeed,
           chips: ep ? ep.chips : roomPlayer.chips,
           isDealer: hs ? hs.players[hs.dealerIndex]?.id === roomPlayer.id : false,
           isSmallBlind: hs ? hs.players[hs.smallBlindIndex]?.id === roomPlayer.id : false,

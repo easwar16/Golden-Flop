@@ -1,14 +1,13 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet } from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
+import { CARD_BACK, getCardImage } from '@/constants/card-images';
 import type { CardValue } from '@/constants/poker';
-import { RED_SUITS } from '@/constants/poker';
 
 interface PokerCardProps {
   card: CardValue | null;
   faceDown?: boolean;
-  /** When set, use this image asset (from card-assets); avoids loading 53 assets until table screen. */
+  /** Override the auto-resolved image (rarely needed). */
   imageSource?: number;
   onPressIn?: () => void;
   onPressOut?: () => void;
@@ -23,76 +22,39 @@ export function PokerCard({
   onPressOut,
   style,
 }: PokerCardProps) {
-  if (imageSource != null) {
-    return (
-      <Pressable
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        style={[styles.card, style]}>
-        <Image
-          source={imageSource}
-          style={styles.image}
-          resizeMode="contain"
-        />
-      </Pressable>
-    );
+  // Resolve which image to show
+  let source: number | undefined = imageSource;
+
+  if (source == null) {
+    if (faceDown || !card) {
+      source = CARD_BACK;
+    } else {
+      source = getCardImage(card.rank, card.suit);
+    }
   }
 
-  if (faceDown || !card) {
-    return (
-      <Pressable
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        style={[styles.card, styles.cardBack, style]}>
-        <View style={styles.backPattern} />
-      </Pressable>
-    );
-  }
-
-  const isRed = RED_SUITS.includes(card.suit);
   return (
-    <Pressable onPressIn={onPressIn} onPressOut={onPressOut} style={[styles.card, style]}>
-      <ThemedText style={[styles.rank, isRed && styles.red]}>{card.rank}</ThemedText>
-      <ThemedText style={[styles.suit, isRed && styles.red]}>{card.suit}</ThemedText>
+    <Pressable
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={[styles.card, style]}>
+      <Image
+        source={source ?? CARD_BACK}
+        style={styles.image}
+        resizeMode="contain"
+      />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    width: 56,
-    height: 80,
-    borderRadius: 8,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#333',
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 4,
-  },
-  cardBack: {
-    backgroundColor: '#1a5fb4',
-  },
-  backPattern: {
-    width: '80%',
-    height: '80%',
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
   },
   image: {
     width: '100%',
     height: '100%',
-  },
-  rank: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  suit: {
-    fontSize: 24,
-  },
-  red: {
-    color: '#c01c28',
   },
 });

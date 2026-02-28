@@ -1,11 +1,13 @@
 /**
  * useUserStore – user profile: username + avatar seed.
  *
- * Uses an in-memory store (no native module required).
- * Data persists within the app session; resets on full restart.
+ * Persisted to AsyncStorage via Zustand's persist middleware.
+ * Data survives app restarts; on first launch defaults are used.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 function randomSeed(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -19,10 +21,18 @@ interface UserState {
   regenerateAvatar: () => void;
 }
 
-export const useUserStore = create<UserState>()((set) => ({
-  username: 'Player',
-  avatarSeed: randomSeed(),
+export const useUserStore = create<UserState>()(
+  persist(
+    (set) => ({
+      username: 'Player',
+      avatarSeed: randomSeed(),
 
-  setUsername: (username) => set({ username: username.trim() || 'Player' }),
-  regenerateAvatar: () => set({ avatarSeed: randomSeed() }),
-}));
+      setUsername: (username) => set({ username: username.trim() || 'Player' }),
+      regenerateAvatar: () => set({ avatarSeed: randomSeed() }),
+    }),
+    {
+      name: 'user-profile',
+      storage: createJSONStorage(() => AsyncStorage),
+    }
+  )
+);

@@ -392,6 +392,44 @@ export function activePlayer(state: HandState): EnginePlayer | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rake calculation (pure function)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RakeResult {
+  /** Pot after rake deduction */
+  playerPot: number;
+  /** Rake collected by the house */
+  rakeAmount: number;
+}
+
+/**
+ * Calculate rake from the total pot.
+ *
+ * @param pot            Total pot in lamports
+ * @param rakePercentage Rake percentage (e.g. 2.5 = 2.5%)
+ * @param rakeCap        Maximum rake per hand in lamports (0 = no cap)
+ */
+export function applyRake(
+  pot: number,
+  rakePercentage: number,
+  rakeCap: number = 0,
+): RakeResult {
+  if (rakePercentage <= 0 || pot <= 0) {
+    return { playerPot: pot, rakeAmount: 0 };
+  }
+
+  let rakeAmount = Math.floor(pot * (rakePercentage / 100));
+  if (rakeCap > 0 && rakeAmount > rakeCap) {
+    rakeAmount = rakeCap;
+  }
+
+  return {
+    playerPot: pot - rakeAmount,
+    rakeAmount,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 

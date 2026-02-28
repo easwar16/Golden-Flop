@@ -20,15 +20,15 @@ export interface TableDefinition {
 }
 
 export const DEFAULT_TABLES: TableDefinition[] = [
-  // ── 🟢 Low Stakes ────────────────────────────────────────────────────────
+  // ── 🟢 Low Stakes (0.03/0.05 SOL blinds) ────────────────────────────────
   {
     id: 'table-low-1',
     name: '🟢 Low Stakes #1',
     config: {
-      smallBlind:   sol(0.0001),    //     100_000 lamports
-      bigBlind:     sol(0.0002),    //     200_000 lamports
-      minBuyIn:     sol(0.01),      //  10_000_000 lamports
-      maxBuyIn:     sol(0.10),      // 100_000_000 lamports
+      smallBlind:   sol(0.0001),
+      bigBlind:     sol(0.0002),
+      minBuyIn:     sol(0.01),
+      maxBuyIn:     sol(0.10),
       maxPlayers:   6,
       turnTimeoutMs: 30_000,
       tokenMint:    NATIVE_SOL_MINT,
@@ -49,16 +49,58 @@ export const DEFAULT_TABLES: TableDefinition[] = [
       isPremium:    false,
     },
   },
+  {
+    id: 'table-low-3',
+    name: '🟢 Low Stakes #3',
+    config: {
+      smallBlind:   sol(0.0001),
+      bigBlind:     sol(0.0002),
+      minBuyIn:     sol(0.01),
+      maxBuyIn:     sol(0.10),
+      maxPlayers:   6,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
+  {
+    id: 'table-low-4',
+    name: '🟢 Low Stakes #4',
+    config: {
+      smallBlind:   sol(0.0002),
+      bigBlind:     sol(0.0004),
+      minBuyIn:     sol(0.02),
+      maxBuyIn:     sol(0.20),
+      maxPlayers:   6,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
+  {
+    id: 'table-low-5',
+    name: '🟢 Low Stakes #5',
+    config: {
+      smallBlind:   sol(0.0002),
+      bigBlind:     sol(0.0004),
+      minBuyIn:     sol(0.02),
+      maxBuyIn:     sol(0.20),
+      maxPlayers:   9,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
 
   // ── 🟡 Mid Stakes ─────────────────────────────────────────────────────────
   {
     id: 'table-mid-1',
     name: '🟡 Mid Stakes #1',
     config: {
-      smallBlind:   sol(0.001),     //   1_000_000 lamports
-      bigBlind:     sol(0.002),     //   2_000_000 lamports
-      minBuyIn:     sol(0.10),      // 100_000_000 lamports
-      maxBuyIn:     sol(1.00),      // 1_000_000_000 lamports
+      smallBlind:   sol(0.001),
+      bigBlind:     sol(0.002),
+      minBuyIn:     sol(0.10),
+      maxBuyIn:     sol(1.00),
       maxPlayers:   6,
       turnTimeoutMs: 30_000,
       tokenMint:    NATIVE_SOL_MINT,
@@ -79,16 +121,58 @@ export const DEFAULT_TABLES: TableDefinition[] = [
       isPremium:    false,
     },
   },
+  {
+    id: 'table-mid-3',
+    name: '🟡 Mid Stakes #3',
+    config: {
+      smallBlind:   sol(0.001),
+      bigBlind:     sol(0.002),
+      minBuyIn:     sol(0.10),
+      maxBuyIn:     sol(1.00),
+      maxPlayers:   6,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
+  {
+    id: 'table-mid-4',
+    name: '🟡 Mid Stakes #4',
+    config: {
+      smallBlind:   sol(0.002),
+      bigBlind:     sol(0.004),
+      minBuyIn:     sol(0.20),
+      maxBuyIn:     sol(2.00),
+      maxPlayers:   6,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
+  {
+    id: 'table-mid-5',
+    name: '🟡 Mid Stakes #5',
+    config: {
+      smallBlind:   sol(0.002),
+      bigBlind:     sol(0.004),
+      minBuyIn:     sol(0.20),
+      maxBuyIn:     sol(2.00),
+      maxPlayers:   9,
+      turnTimeoutMs: 30_000,
+      tokenMint:    NATIVE_SOL_MINT,
+      isPremium:    false,
+    },
+  },
 
   // ── 🔴 High Roller ────────────────────────────────────────────────────────
   {
     id: 'table-high-1',
     name: '🔴 High Roller #1',
     config: {
-      smallBlind:   sol(0.01),      //  10_000_000 lamports
-      bigBlind:     sol(0.02),      //  20_000_000 lamports
-      minBuyIn:     sol(1.00),      // 1_000_000_000 lamports
-      maxBuyIn:     sol(10.00),     // 10_000_000_000 lamports
+      smallBlind:   sol(0.01),
+      bigBlind:     sol(0.02),
+      minBuyIn:     sol(1.00),
+      maxBuyIn:     sol(10.00),
       maxPlayers:   6,
       turnTimeoutMs: 30_000,
       tokenMint:    NATIVE_SOL_MINT,

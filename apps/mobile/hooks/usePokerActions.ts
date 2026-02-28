@@ -15,10 +15,6 @@ import { useGameStore } from '../stores/useGameStore';
 type Action = 'fold' | 'check' | 'call' | 'raise' | 'all-in';
 
 export function usePokerActions() {
-  const tableId = useGameStore((s) => s.tableId);
-  const isMyTurn = useGameStore((s) => s.isMyTurn);
-  const mySeatIndex = useGameStore((s) => s.mySeatIndex);
-  const seats = useGameStore((s) => s.seats);
   const minRaise = useGameStore((s) => s.minRaise);
   const maxRaise = useGameStore((s) => s.maxRaise);
   const currentBet = useGameStore((s) => s.currentBet);
@@ -27,14 +23,17 @@ export function usePokerActions() {
 
   const dispatch = useCallback(
     (action: Action, amount?: number) => {
-      if (!tableId || !isMyTurn) return;
+      // Always read fresh state from the store — closure values can be stale
+      // between rapid taps or when server pushes state updates mid-render.
+      const state = useGameStore.getState();
+      if (!state.tableId || !state.isMyTurn) return;
 
       // Guard: never send if the local seat is already folded or all-in
-      const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
+      const mySeat = state.mySeatIndex !== null ? state.seats[state.mySeatIndex] : null;
       if (mySeat?.isFolded || mySeat?.isAllIn) return;
 
       // Optimistically clear turn so rapid taps / race conditions can't double-send
-      useGameStore.getState().clearMyTurn();
+      state.clearMyTurn();
 
       try {
         Haptics.impactAsync(
@@ -46,9 +45,9 @@ export function usePokerActions() {
         // Haptics not available (web / simulator)
       }
 
-      SocketService.sendAction(tableId, action, amount);
+      SocketService.sendAction(state.tableId, action, amount);
     },
-    [tableId, isMyTurn, mySeatIndex, seats]
+    [] // no closure deps — reads live state via getState() every call
   );
 
   const fold = useCallback(() => dispatch('fold'), [dispatch]);
@@ -72,6 +71,7 @@ export function usePokerActions() {
   const allIn = useCallback(() => dispatch('all-in', myChips), [dispatch, myChips]);
 
   const callAmount = Math.min(currentBet, myChips);
+  const isMyTurn = useGameStore((s) => s.isMyTurn);
 
   return { fold, check, call, raise, allIn, callAmount, minRaise, maxRaise, isMyTurn };
 }

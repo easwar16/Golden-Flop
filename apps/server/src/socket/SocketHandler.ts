@@ -4,6 +4,12 @@
  * Rules:
  *  - No game logic here.  Validate input shape, then delegate to RoomManager / Room.
  *  - All game state lives in Room / GameEngine.
+ *
+ * Auth:
+ *  - playerId + playerName are always required (game identity layer).
+ *  - token (JWT) is optional.  When present, userId is extracted and
+ *    internal balance checks are applied before joining real-money tables.
+ *  - Without a JWT the player can still spectate and play practice games.
  */
 
 import type { Server, Socket } from 'socket.io';
@@ -15,9 +21,17 @@ import type {
 } from '@goldenflop/shared';
 import { RoomManager } from '../room/RoomManager';
 import { TableRegistry } from '../table/TableRegistry';
+import { extractSocketUser } from '../auth/jwtMiddleware';
+import { processBuyIn, processCashOut } from '../balance/BalanceService';
+import { verifySOLDepositToVault } from '../solana/SolanaService';
+import { processPlayerCashOut } from '../solana/PayoutService';
+import { prisma } from '../db/prisma';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+
+// Prevent concurrent join attempts for the same player
+const joinInFlight = new Set<string>();
 
 export function registerSocketHandlers(
   io: IO,
@@ -28,16 +42,23 @@ export function registerSocketHandlers(
     console.log(`[socket] connected: ${socket.id}`);
 
     // ── Middleware: attach player identity from auth ──────────────────────
-    const { playerId, playerName } = socket.handshake.auth as {
+    const { playerId, playerName, avatarSeed: rawAvatarSeed, token } = socket.handshake.auth as {
       playerId?: string;
       playerName?: string;
+      avatarSeed?: string;
+      token?: string;         // JWT from mobile SecureStore — optional
     };
+    const avatarSeed = rawAvatarSeed ?? playerId ?? 'default';
 
     if (!playerId || !playerName) {
       socket.emit('error', { code: 'AUTH_REQUIRED', message: 'playerId and playerName are required in handshake.auth' });
       socket.disconnect();
       return;
     }
+
+    // Extract DB userId from JWT if provided (nil = practice/guest mode)
+    const jwtUser = extractSocketUser(token);
+    const userId  = jwtUser?.userId ?? null; // null = guest, no balance checks
 
     socket.data.playerId = playerId;
     socket.data.playerName = playerName;
@@ -90,23 +111,47 @@ export function registerSocketHandlers(
 
     // ── Join table ────────────────────────────────────────────────────────
 
-    socket.on('join_table', (payload, ack) => {
-      const room = roomManager.getRoom(payload.tableId);
-      if (!room) {
-        ack?.('Table not found');
+    socket.on('join_table', async (payload, ack) => {
+      // ── Double-join guard ─────────────────────────────────────────────
+      const joinKey = `${playerId}:${payload.tableId}`;
+      if (joinInFlight.has(joinKey)) {
+        ack?.('Join already in progress');
         return;
       }
+      joinInFlight.add(joinKey);
 
-      const err = room.join(socket, playerId, playerName, payload.buyIn);
-      if (err) {
-        ack?.(err);
-        return;
+      try {
+        const room = roomManager.getRoom(payload.tableId);
+        if (!room) {
+          ack?.('Table not found');
+          return;
+        }
+
+        // ── Balance check for authenticated users ──────────────────────────
+        // Guests (no JWT) bypass the check — they use in-memory chips only.
+        if (userId) {
+          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn));
+          if (!buyInResult.success) {
+            ack?.(buyInResult.error ?? 'Insufficient balance');
+            return;
+          }
+        }
+
+        const err = room.join(socket, playerId, playerName, avatarSeed, payload.buyIn, undefined, { userId });
+        if (err) {
+          // Refund the deducted balance if join itself fails
+          if (userId) await processCashOut(userId, BigInt(payload.buyIn));
+          ack?.(err);
+          return;
+        }
+
+        socket.data.currentTableId = payload.tableId;
+        ack?.(null);
+        roomManager.broadcastLobby();
+        console.log(`[room] ${playerId} (userId:${userId ?? 'guest'}) joined ${payload.tableId}`);
+      } finally {
+        joinInFlight.delete(joinKey);
       }
-
-      socket.data.currentTableId = payload.tableId;
-      ack?.(null);
-      roomManager.broadcastLobby();
-      console.log(`[room] ${playerId} joined ${payload.tableId}`);
     });
 
     // ── Sit at specific seat (predefined tables) ──────────────────────────
@@ -114,44 +159,160 @@ export function registerSocketHandlers(
     // Identical to join_table but lets the player choose their seat index.
     // Works on both predefined and dynamic tables.
 
-    socket.on('sit_at_seat', (payload, ack) => {
-      const room = roomManager.getRoom(payload.tableId);
-      if (!room) {
-        ack?.({ error: 'Table not found' });
+    socket.on('sit_at_seat', async (payload, ack) => {
+      // ── Double-join guard ─────────────────────────────────────────────
+      const joinKey = `${playerId}:${payload.tableId}`;
+      if (joinInFlight.has(joinKey)) {
+        ack?.({ error: 'Join already in progress' });
         return;
       }
+      joinInFlight.add(joinKey);
 
-      // Validate buy-in range
-      if (payload.buyIn < room.config.minBuyIn) {
-        ack?.({ error: `Minimum buy-in is ${room.config.minBuyIn} lamports` });
-        return;
+      try {
+        const room = roomManager.getRoom(payload.tableId);
+        if (!room) {
+          ack?.({ error: 'Table not found' });
+          return;
+        }
+
+        // Validate buy-in range
+        if (payload.buyIn < room.config.minBuyIn) {
+          ack?.({ error: `Minimum buy-in is ${room.config.minBuyIn} lamports` });
+          return;
+        }
+        if (payload.buyIn > room.config.maxBuyIn) {
+          ack?.({ error: `Maximum buy-in is ${room.config.maxBuyIn} lamports` });
+          return;
+        }
+
+        const txSignature = (payload as any).txSignature as string | undefined;
+        let isVaultPlayer = false;
+        let walletAddress: string | null = null;
+
+        if (txSignature && userId) {
+          // ── Vault flow: verify on-chain deposit to room vault ─────────
+          const dbRoom = await prisma.room.findUnique({
+            where: { id: payload.tableId },
+            select: { vaultAddress: true },
+          });
+
+          if (!dbRoom?.vaultAddress) {
+            ack?.({ error: 'Room does not support vault deposits' });
+            return;
+          }
+
+          // Get wallet address from JWT payload
+          const jwtPayload = extractSocketUser(token);
+          walletAddress = jwtPayload?.walletAddress ?? null;
+          if (!walletAddress) {
+            ack?.({ error: 'Wallet address not found in auth token' });
+            return;
+          }
+
+          // Idempotency: check if this tx was already used
+          const existingDeposit = await prisma.deposit.findUnique({
+            where: { transactionSignature: txSignature },
+          });
+          if (existingDeposit) {
+            if (existingDeposit.userId !== userId) {
+              ack?.({ error: 'Transaction already claimed by another user' });
+              return;
+            }
+            // Already processed — allow re-seating with this deposit
+          } else {
+            // Verify on-chain
+            const verification = await verifySOLDepositToVault(
+              txSignature,
+              BigInt(payload.buyIn),
+              walletAddress,
+              dbRoom.vaultAddress,
+            );
+
+            if (!verification.success) {
+              ack?.({ error: verification.error ?? 'On-chain verification failed' });
+              return;
+            }
+
+            // Record deposit
+            await prisma.deposit.create({
+              data: {
+                userId,
+                tokenType: 'SOL',
+                amount: verification.confirmedAmount!,
+                transactionSignature: txSignature,
+                status: 'CONFIRMED',
+              },
+            });
+          }
+
+          isVaultPlayer = true;
+        } else if (userId) {
+          // ── Internal balance flow (existing) ──────────────────────────
+          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn));
+          if (!buyInResult.success) {
+            ack?.({ error: buyInResult.error ?? 'Insufficient balance' });
+            return;
+          }
+        }
+        // else: guest mode — no balance checks
+
+        const err = room.join(
+          socket,
+          playerId,
+          payload.playerName ?? playerName,
+          payload.avatarSeed ?? avatarSeed,
+          payload.buyIn,
+          payload.seatIndex,
+          { userId, walletAddress, isVaultPlayer },
+        );
+        if (err) {
+          // Refund internal balance if join fails (vault deposits are already on-chain)
+          if (userId && !isVaultPlayer) await processCashOut(userId, BigInt(payload.buyIn));
+          ack?.({ error: err });
+          return;
+        }
+
+        const seatIndex = payload.seatIndex ?? [...room['seats'].keys()].find(
+          k => room['seats'].get(k)?.id === playerId
+        ) ?? 0;
+
+        socket.data.currentTableId = payload.tableId;
+        ack?.({ seatIndex });
+        roomManager.broadcastLobby();
+        console.log(`[room] ${playerId} (userId:${userId ?? 'guest'}, vault:${isVaultPlayer}) sat at seat ${seatIndex} @ ${payload.tableId}`);
+      } finally {
+        joinInFlight.delete(joinKey);
       }
-      if (payload.buyIn > room.config.maxBuyIn) {
-        ack?.({ error: `Maximum buy-in is ${room.config.maxBuyIn} lamports` });
-        return;
-      }
-
-      const err = room.join(socket, playerId, playerName, payload.buyIn, payload.seatIndex);
-      if (err) {
-        ack?.({ error: err });
-        return;
-      }
-
-      const seatIndex = payload.seatIndex ?? [...room['seats'].keys()].find(
-        k => room['seats'].get(k)?.id === playerId
-      ) ?? 0;
-
-      socket.data.currentTableId = payload.tableId;
-      ack?.({ seatIndex });
-      roomManager.broadcastLobby();
-      console.log(`[room] ${playerId} sat at seat ${seatIndex} @ ${payload.tableId}`);
     });
 
     // ── Leave table ───────────────────────────────────────────────────────
 
-    socket.on('leave_table', (payload) => {
+    socket.on('leave_table', async (payload) => {
       const room = roomManager.getRoom(payload.tableId);
       if (!room) return;
+
+      const seat = room.getPlayerById(playerId);
+      if (seat && seat.chips > 0) {
+        if (seat.isVaultPlayer && seat.walletAddress && seat.userId) {
+          // ── Vault flow: transfer from vault to player's wallet on-chain ──
+          void processPlayerCashOut(
+            payload.tableId,
+            seat.userId,
+            seat.walletAddress,
+            BigInt(seat.chips),
+          ).then(sig => {
+            if (sig) {
+              console.log(`[economy] vault cash-out: ${seat.chips} lamports → ${seat.walletAddress} (tx: ${sig})`);
+            } else {
+              console.error(`[economy] vault cash-out FAILED for ${seat.walletAddress}, ${seat.chips} lamports`);
+            }
+          });
+        } else if (userId) {
+          // ── Internal balance flow (existing) ──
+          await processCashOut(userId, BigInt(seat.chips));
+          console.log(`[economy] cashed out ${seat.chips} chips → userId:${userId}`);
+        }
+      }
 
       room.leave(socket.id);
       socket.leave(payload.tableId);
@@ -164,7 +325,10 @@ export function registerSocketHandlers(
 
     socket.on('watch_table', (payload: { tableId: string }) => {
       const room = roomManager.getRoom(payload.tableId);
-      if (!room) return;
+      if (!room) { console.log(`[watch_table] room not found: ${payload.tableId}`); return; }
+      socket.join(payload.tableId);
+      socket.data.currentTableId = payload.tableId;
+      console.log(`[watch_table] ${socket.id} joined room ${payload.tableId}`);
       socket.emit('table_state', room.buildStateFor(null));
     });
 

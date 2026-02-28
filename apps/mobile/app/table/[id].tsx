@@ -12,7 +12,8 @@ import {
   useFonts,
   PressStart2P_400Regular,
 } from '@expo-google-fonts/press-start-2p';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useTransition } from '@/contexts/transition-context';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Haptics from 'expo-haptics';
 import React, {
@@ -23,8 +24,8 @@ import React, {
   useState,
 } from 'react';
 import {
-  Alert,
   Animated,
+  BackHandler,
   Easing,
   Image,
   ImageBackground,
@@ -146,7 +147,7 @@ const SeatSlot = memo(function SeatSlot({
   const myUsername = useUserStore((s) => s.username);
 
   // Own seat → always show profile avatar + username; others → use server data
-  const seed = isMine ? myAvatarSeed : (seat?.playerId ?? myAvatarSeed);
+  const seed = isMine ? myAvatarSeed : (seat?.avatarSeed ?? seat?.playerId ?? myAvatarSeed);
   const displayName = isMine ? myUsername : (seat?.name ?? '');
 
   return (
@@ -278,6 +279,100 @@ const slotStyles = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Themed alert modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface GameAlertProps {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+}
+
+const GameAlert = memo(function GameAlert({ visible, title, message, onClose }: GameAlertProps) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={gaStyles.overlay}>
+        <View style={gaStyles.panel}>
+          <View style={gaStyles.topBar} />
+          <Text style={gaStyles.title}>{title}</Text>
+          <View style={gaStyles.divider} />
+          <Text style={gaStyles.message}>{message}</Text>
+          <Pressable style={gaStyles.btn} onPress={onClose}>
+            <Text style={gaStyles.btnText}>OK</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+});
+
+const gaStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  panel: {
+    width: '78%',
+    backgroundColor: '#1A0A2E',
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    borderRadius: 16,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: { shadowColor: '#FFD700', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 18 },
+      android: { elevation: 20 },
+    }),
+  },
+  topBar: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#FFD700',
+  },
+  title: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: 12,
+    color: '#FFD700',
+    marginTop: 22,
+    letterSpacing: 1,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  divider: {
+    width: '80%',
+    height: 1,
+    backgroundColor: 'rgba(255,215,0,0.25)',
+    marginVertical: 14,
+  },
+  message: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: 7,
+    color: 'rgba(255,235,180,0.9)',
+    lineHeight: 14,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 22,
+  },
+  btn: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,215,0,0.3)',
+    width: '100%',
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,215,0,0.07)',
+  },
+  btnText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: 10,
+    color: '#FFD700',
+    letterSpacing: 2,
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Buy-in modal (opens when player taps an empty seat)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -298,6 +393,9 @@ const BuyInModal = memo(function BuyInModal({
   visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose,
 }: BuyInModalProps) {
   const [amount, setAmount] = useState(String(minBuyIn));
+  const avatarSeed = useUserStore((s) => s.avatarSeed);
+  const username = useUserStore((s) => s.username);
+  const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
 
   // Reset to minBuyIn whenever the modal opens for a new seat
   useEffect(() => {
@@ -307,50 +405,58 @@ const BuyInModal = memo(function BuyInModal({
   const handleConfirm = useCallback(async () => {
     const buyIn = parseInt(amount, 10);
     if (isNaN(buyIn) || buyIn < minBuyIn) {
-      Alert.alert('Invalid amount', `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL`);
+      setAlert({ title: 'INVALID AMOUNT', message: `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
       return;
     }
     if (buyIn > maxBuyIn) {
-      Alert.alert('Invalid amount', `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL`);
+      setAlert({ title: 'INVALID AMOUNT', message: `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
       return;
     }
     onClose();
-    const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex);
-    if ('error' in res) Alert.alert('Cannot join', res.error);
+    const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
+    if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
   }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={bimStyles.overlay}>
-          <TouchableWithoutFeedback onPress={() => { }}>
-            <View style={bimStyles.panel}>
-              <Text style={bimStyles.title}>BUY IN</Text>
-              <Text style={bimStyles.sub}>Seat {seatIndex + 1}</Text>
-              <Text style={bimStyles.range}>
-                {lamportsToSol(minBuyIn)} – {lamportsToSol(maxBuyIn)} SOL
-              </Text>
-              <TextInput
-                style={bimStyles.input}
-                value={amount}
-                onChangeText={(t) => setAmount(t.replace(/\D/g, ''))}
-                keyboardType="number-pad"
-                selectTextOnFocus
-                placeholderTextColor="rgba(255,255,255,0.4)"
-              />
-              <Pressable
-                style={({ pressed }) => [bimStyles.btn, pressed && bimStyles.btnPressed]}
-                onPress={handleConfirm}>
-                <Text style={bimStyles.btnText}>SIT DOWN</Text>
-              </Pressable>
-              <Pressable onPress={onClose} style={{ paddingVertical: 4 }}>
-                <Text style={bimStyles.cancel}>Cancel</Text>
-              </Pressable>
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+    <>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <TouchableWithoutFeedback onPress={onClose}>
+          <View style={bimStyles.overlay}>
+            <TouchableWithoutFeedback onPress={() => { }}>
+              <View style={bimStyles.panel}>
+                <Text style={bimStyles.title}>BUY IN</Text>
+                <Text style={bimStyles.sub}>Seat {seatIndex + 1}</Text>
+                <Text style={bimStyles.range}>
+                  {lamportsToSol(minBuyIn)} – {lamportsToSol(maxBuyIn)} SOL
+                </Text>
+                <TextInput
+                  style={bimStyles.input}
+                  value={amount}
+                  onChangeText={(t) => setAmount(t.replace(/\D/g, ''))}
+                  keyboardType="number-pad"
+                  selectTextOnFocus
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                />
+                <Pressable
+                  style={({ pressed }) => [bimStyles.btn, pressed && bimStyles.btnPressed]}
+                  onPress={handleConfirm}>
+                  <Text style={bimStyles.btnText}>SIT DOWN</Text>
+                </Pressable>
+                <Pressable onPress={onClose} style={{ paddingVertical: 4 }}>
+                  <Text style={bimStyles.cancel}>Cancel</Text>
+                </Pressable>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+      <GameAlert
+        visible={!!alert}
+        title={alert?.title ?? ''}
+        message={alert?.message ?? ''}
+        onClose={() => setAlert(null)}
+      />
+    </>
   );
 });
 
@@ -472,56 +578,156 @@ const woStyles = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hand result overlay
+// Chip sweep animation — coins fly from pot center to winner's seat
 // ─────────────────────────────────────────────────────────────────────────────
 
-const HandResultOverlay = memo(function HandResultOverlay() {
-  const result = useGameStore((s) => s.lastHandResult);
-  const dismiss = useGameStore((s) => s.dismissHandResult);
-  if (!result) return null;
+const CHIP_COUNT = 10;
+
+interface ChipSweepProps {
+  origin: { x: number; y: number };
+  target: { x: number; y: number };
+  winAmount: number;
+  handName: string;
+  onComplete: () => void;
+}
+
+const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete }: ChipSweepProps) {
+  const chips = useRef(
+    Array.from({ length: CHIP_COUNT }, () => ({
+      x: new Animated.Value(origin.x),
+      y: new Animated.Value(origin.y),
+      opacity: new Animated.Value(0),
+      scale: new Animated.Value(0.2),
+    }))
+  ).current;
+
+  const labelOpacity = useRef(new Animated.Value(0)).current;
+  const labelScale = useRef(new Animated.Value(0.6)).current;
+  const handNameOpacity = useRef(new Animated.Value(0)).current;
+  const handNameScale = useRef(new Animated.Value(0.4)).current;
+  const handNameY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const chipAnims = chips.map((chip, i) => {
+      const tx = target.x + (Math.random() - 0.5) * 14;
+      const ty = target.y + (Math.random() - 0.5) * 14;
+      return Animated.sequence([
+        Animated.delay(i * 55),
+        Animated.parallel([
+          Animated.timing(chip.x, { toValue: tx, duration: 520, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(chip.y, { toValue: ty, duration: 520, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.sequence([
+            Animated.timing(chip.opacity, { toValue: 1, duration: 60, useNativeDriver: true }),
+            Animated.delay(340),
+            Animated.timing(chip.opacity, { toValue: 0, duration: 160, useNativeDriver: true }),
+          ]),
+          Animated.sequence([
+            Animated.timing(chip.scale, { toValue: 1.1, duration: 220, useNativeDriver: true }),
+            Animated.timing(chip.scale, { toValue: 0.7, duration: 300, useNativeDriver: true }),
+          ]),
+        ]),
+      ]);
+    });
+
+    const labelAnim = Animated.sequence([
+      Animated.delay(180),
+      Animated.parallel([
+        Animated.timing(labelOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.timing(labelScale, { toValue: 1, duration: 220, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
+      ]),
+      Animated.delay(800),
+      Animated.parallel([
+        Animated.timing(labelOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(labelScale, { toValue: 1.2, duration: 300, useNativeDriver: true }),
+      ]),
+    ]);
+
+    const handNameAnim = Animated.sequence([
+      Animated.parallel([
+        Animated.timing(handNameOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(handNameScale, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
+      ]),
+      Animated.delay(900),
+      Animated.parallel([
+        Animated.timing(handNameOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(handNameY, { toValue: -18, duration: 300, useNativeDriver: true }),
+      ]),
+    ]);
+
+    Animated.parallel([...chipAnims, labelAnim, handNameAnim]).start(() => onComplete());
+  }, []);
 
   return (
-    <View style={hrStyles.overlay}>
-      <View style={hrStyles.panel}>
-        <Text style={hrStyles.title}>HAND OVER</Text>
-        {result.winners.map((w) => (
-          <View key={w.playerId} style={hrStyles.row}>
-            <Text style={hrStyles.winnerName}>{w.name}</Text>
-            <Text style={hrStyles.winnerHand}>{w.bestHandName}</Text>
-            <Text style={hrStyles.winAmount}>+{formatChips(w.winAmount)}</Text>
-          </View>
-        ))}
-        <Pressable
-          style={({ pressed }) => [hrStyles.btn, pressed && hrStyles.btnPressed]}
-          onPress={dismiss}>
-          <Text style={hrStyles.btnText}>CONTINUE</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-});
+    <>
+      {chips.map((chip, i) => (
+        <Animated.View
+          key={i}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: -10, top: -10,
+            width: 20, height: 20,
+            borderRadius: 10,
+            backgroundColor: gold,
+            borderWidth: 2,
+            borderColor: '#B8860B',
+            opacity: chip.opacity,
+            transform: [{ translateX: chip.x }, { translateY: chip.y }, { scale: chip.scale }],
+            ...Platform.select({
+              ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 6 },
+              android: { elevation: 6 },
+              default: {},
+            }),
+          }}
+        />
+      ))}
+      {/* Winning hand name — bursts from pot center */}
+      <Animated.Text
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: origin.x - 110,
+          top: origin.y - 70,
+          width: 220,
+          textAlign: 'center',
+          fontFamily: 'PressStart2P_400Regular',
+          fontSize: 13,
+          color: gold,
+          opacity: handNameOpacity,
+          transform: [{ scale: handNameScale }, { translateY: handNameY }],
+          textShadowColor: 'rgba(0,0,0,0.9)',
+          textShadowOffset: { width: 0, height: 2 },
+          textShadowRadius: 6,
+          zIndex: 55,
+        }}
+      >
+        {handName.toUpperCase()}
+      </Animated.Text>
 
-const hrStyles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center', alignItems: 'center', zIndex: 50,
-  },
-  panel: {
-    backgroundColor: '#1a0a2e', borderWidth: 2, borderColor: gold,
-    borderRadius: 20, padding: 24, width: 300, gap: 12, alignItems: 'center',
-  },
-  title: { fontFamily: 'PressStart2P_400Regular', fontSize: 14, color: gold, marginBottom: 8 },
-  row: { width: '100%', gap: 4, alignItems: 'center' },
-  winnerName: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: '#fff' },
-  winnerHand: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.7)' },
-  winAmount: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#00FF88' },
-  btn: {
-    marginTop: 8, backgroundColor: '#512E7B', borderWidth: 2, borderColor: gold,
-    borderRadius: 10, paddingVertical: 12, paddingHorizontal: 32,
-  },
-  btnPressed: { opacity: 0.85 },
-  btnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold },
+      {/* +amount label near winner's avatar */}
+      <Animated.Text
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: target.x - 55,
+          top: target.y - 52,
+          width: 110,
+          textAlign: 'center',
+          fontFamily: 'PressStart2P_400Regular',
+          fontSize: 10,
+          color: '#00FF88',
+          opacity: labelOpacity,
+          transform: [{ scale: labelScale }],
+          textShadowColor: '#000',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 4,
+          zIndex: 60,
+        }}
+      >
+        +{formatChips(winAmount)}
+      </Animated.Text>
+    </>
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -730,6 +936,8 @@ export default function TableScreen() {
   const raiseAmount = useGameStore((s) => s.raiseAmount);
   const setRaiseAmount = useGameStore((s) => s.setRaiseAmount);
   const myHand = useGameStore((s) => s.myHand);
+  const lastHandResult = useGameStore((s) => s.lastHandResult);
+  const dismissHandResult = useGameStore((s) => s.dismissHandResult);
 
   // Must be before any early return (Rules of Hooks)
   const lobbyTables = useLobbyStore((s) => s.tables);
@@ -737,14 +945,19 @@ export default function TableScreen() {
   const { fold, call, raise, minRaise, maxRaise } = usePokerActions();
   const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt));
 
+  const { hideTransition } = useTransition();
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
   const [buyInModal, setBuyInModal] = useState<{ visible: boolean; seatIndex: number }>({
     visible: false, seatIndex: 0,
   });
+  const [leaveConfirmVisible, setLeaveConfirmVisible] = useState(false);
 
   const onLayoutRoot = useCallback(async () => {
-    if (fontsLoaded || fontError) await SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
+    if (fontsLoaded || fontError) {
+      await SplashScreen.hideAsync();
+      hideTransition();
+    }
+  }, [fontsLoaded, fontError, hideTransition]);
 
   // Haptic pulse on turn start
   useEffect(() => {
@@ -768,10 +981,22 @@ export default function TableScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Navigate back if connection is lost and we're not in a table
-  const handleLeave = useCallback(() => {
+  const confirmLeave = useCallback(() => {
     router.back(); // unmount triggers leaveTable via the cleanup useEffect above
   }, [router]);
+
+  const handleLeave = useCallback(() => {
+    setLeaveConfirmVisible(true);
+  }, []);
+
+  // Intercept Android hardware back button — show confirmation instead of leaving instantly
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setLeaveConfirmVisible(true);
+      return true; // prevent default back behaviour
+    });
+    return () => sub.remove();
+  }, []);
 
   const handleSeatPress = useCallback((seatIndex: number) => {
     setBuyInModal({ visible: true, seatIndex });
@@ -829,6 +1054,9 @@ export default function TableScreen() {
 
   return (
     <View style={styles.container} onLayout={onLayoutRoot}>
+      {/* Disable swipe-back on iOS and hide the native header */}
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
+
       <ImageBackground source={require('@/assets/images/table-room-bg.png')} style={StyleSheet.absoluteFill} resizeMode="cover" />
       <DustParticles />
 
@@ -852,8 +1080,17 @@ export default function TableScreen() {
         />
       )}
 
-      {/* Hand result overlay */}
-      <HandResultOverlay />
+      {/* Chip sweep — coins fly from pot to winner's seat on hand end */}
+      {lastHandResult && lastHandResult.winners.map((w) => (
+        <ChipSweep
+          key={`${lastHandResult.handId}-${w.playerId}`}
+          origin={deckOrigin}
+          target={getSeatCenter(w.seatIndex)}
+          winAmount={w.winAmount}
+          handName={w.bestHandName}
+          onComplete={dismissHandResult}
+        />
+      ))}
 
       {/* Countdown overlay */}
       {phase === 'countdown' && <CountdownOverlay seconds={countdownSeconds} />}
@@ -877,7 +1114,7 @@ export default function TableScreen() {
                   {card
                     ? <PokerCard card={card} style={styles.cardSize} />
                     : showBack
-                      ? <Image source={require('@/assets/images/card-back.png')} style={styles.cardSize} resizeMode="stretch" />
+                      ? <PokerCard card={null} faceDown style={styles.cardSize} />
                       : <View style={styles.emptyCard} />}
                 </View>
               );
@@ -892,7 +1129,7 @@ export default function TableScreen() {
                 card ? (
                   <PokerCard key={i} card={card as CardValue} style={styles.holeCard} />
                 ) : (
-                  <Image key={i} source={require('@/assets/images/card-back.png')} style={styles.holeCard} resizeMode="stretch" />
+                  <PokerCard key={i} card={null} faceDown style={styles.holeCard} />
                 )
               )}
             </View>
@@ -932,14 +1169,13 @@ export default function TableScreen() {
             <Text style={styles.balanceValue} numberOfLines={1}>{formatChips(myChips)}</Text>
           </View>
           <View style={styles.flex1} />
-          <View style={styles.topRight}>
-            <Text style={styles.roomLabel}>ROOM: </Text>
-            <Text style={styles.roomValue}>{roomId}</Text>
-            <Pressable style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnP]} onPress={handleLeave}>
-              <Text style={styles.leaveText}>Leave</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.roomChip} numberOfLines={1}>{roomId}</Text>
         </ImageBackground>
+        <Pressable
+          style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnP]}
+          onPress={handleLeave}>
+          <Text style={styles.leaveText}>LEAVE</Text>
+        </Pressable>
       </View>
 
       {/* Turn countdown — absolute, floats below the top bar on the right */}
@@ -950,6 +1186,30 @@ export default function TableScreen() {
           </Text>
         </View>
       )}
+
+      {/* Leave confirmation modal */}
+      <Modal
+        visible={leaveConfirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLeaveConfirmVisible(false)}>
+        <View style={lcStyles.overlay}>
+          <View style={lcStyles.panel}>
+            <Text style={lcStyles.title}>LEAVE GAME?</Text>
+            <Text style={lcStyles.sub}>You will forfeit your seat and any chips in play.</Text>
+            <Pressable
+              style={({ pressed }) => [lcStyles.confirmBtn, pressed && lcStyles.btnPressed]}
+              onPress={confirmLeave}>
+              <Text style={lcStyles.confirmText}>LEAVE</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [lcStyles.cancelBtn, pressed && lcStyles.btnPressed]}
+              onPress={() => setLeaveConfirmVisible(false)}>
+              <Text style={lcStyles.cancelText}>STAY</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {/* Action bar — only when seated */}
       {mySeatIndex !== null && (
@@ -1054,13 +1314,20 @@ const styles = StyleSheet.create({
   seatWrap: { position: 'absolute', zIndex: 20 },
 
   // Top bar
-  topBarWrap: { position: 'absolute', left: 12, right: 12, zIndex: 10 },
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, overflow: 'hidden' },
+  topBarWrap: {
+    position: 'absolute', left: 12, right: 12, zIndex: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  topBar: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, overflow: 'hidden' },
   balanceRow: { marginStart: 6, marginTop: 5, flexDirection: 'row', alignItems: 'center', flexShrink: 0 },
   flex1: { flex: 1, minWidth: 6 },
   coinIcon: { width: 22, height: 22, marginRight: 4, marginVertical: 6, marginStart: 34 },
   balanceLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: 'rgba(255,245,220,0.8)' },
   balanceValue: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: '#FFF8E8', flex: 1 },
+  roomChip: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 6,
+    color: 'rgba(255,255,255,0.5)', marginEnd: 10,
+  },
   timerBadge: {
     backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
     paddingHorizontal: 8, paddingVertical: 2,
@@ -1069,12 +1336,28 @@ const styles = StyleSheet.create({
   timerBadgeUrgent: { borderColor: '#FF4444', backgroundColor: 'rgba(180,0,0,0.4)' },
   timerText: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold },
   timerTextUrgent: { color: '#FF4444' },
-  topRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  roomLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 7 : 6, color: 'rgba(255,255,255,0.9)' },
-  roomValue: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 7 : 6, color: gold },
-  leaveBtn: { paddingVertical: 4, paddingHorizontal: 8, backgroundColor: 'rgba(198,34,34,0.9)', borderRadius: 6 },
-  leaveBtnP: { opacity: 0.85 },
-  leaveText: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#fff' },
+  leaveBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(180,30,30,0.92)',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#FF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#FF0000', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.45, shadowRadius: 6 },
+      android: { elevation: 6 },
+      default: {},
+    }),
+  },
+  leaveBtnP: { opacity: 0.8 },
+  leaveText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: Platform.OS === 'web' ? 8 : 7,
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
 
   // Bottom controls
   bottomControls: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, zIndex: 10 },
@@ -1123,4 +1406,41 @@ const styles = StyleSheet.create({
     fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff',
     textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
+});
+
+// Leave-confirmation modal styles
+const lcStyles = StyleSheet.create({
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.78)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  panel: {
+    backgroundColor: '#1a0a2e', borderWidth: 2, borderColor: gold,
+    borderRadius: 20, padding: 28, width: 300,
+    alignItems: 'center', gap: 16,
+    ...Platform.select({
+      ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 12 },
+      android: { elevation: 12 }, default: {},
+    }),
+  },
+  title: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 14, color: gold, letterSpacing: 1,
+  },
+  sub: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7,
+    color: 'rgba(255,255,255,0.7)', textAlign: 'center', lineHeight: 14,
+  },
+  confirmBtn: {
+    width: '100%', paddingVertical: 14, borderRadius: 12,
+    backgroundColor: 'rgba(198,34,34,0.9)', borderWidth: 2, borderColor: '#FF4444',
+    alignItems: 'center',
+  },
+  cancelBtn: {
+    width: '100%', paddingVertical: 14, borderRadius: 12,
+    backgroundColor: 'rgba(81,46,123,0.9)', borderWidth: 2, borderColor: gold,
+    alignItems: 'center',
+  },
+  btnPressed: { opacity: 0.8 },
+  confirmText: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#fff' },
+  cancelText: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: gold },
 });

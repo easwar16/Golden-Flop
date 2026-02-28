@@ -29,6 +29,8 @@ export interface SitAtSeatPayload {
   tableId: string;
   seatIndex?: number;   // undefined = auto-assign first available
   buyIn: number;        // in lamports
+  avatarSeed?: string;  // override handshake value with current store value
+  playerName?: string;  // override handshake value with current store value
 }
 
 export interface LeaveTablePayload {

@@ -2,7 +2,8 @@ import {
   useFonts,
   PressStart2P_400Regular,
 } from '@expo-google-fonts/press-start-2p';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
+import { useTransition } from '@/contexts/transition-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useState } from 'react';
 import {
@@ -18,8 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { showTransition } = useTransition();
   const [hoveredBtn, setHoveredBtn] = useState<'play' | 'private' | 'leaderboard' | null>(null);
-  const [playPressed, setPlayPressed] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
     PressStart2P_400Regular,
@@ -42,17 +43,6 @@ export default function HomeScreen() {
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       />
-      {/* Neon accent bar */}
-      <View
-        style={[
-          styles.neonBar,
-          {
-            top: insets.top,
-          },
-        ]}
-        pointerEvents="none"
-      />
-
       <View
         style={[
           styles.content,
@@ -70,35 +60,31 @@ export default function HomeScreen() {
               onMouseEnter: () => setHoveredBtn('play'),
               onMouseLeave: () => setHoveredBtn(null),
             } as any)}>
-            <Link href="/(tabs)/lobby" asChild>
               <Pressable
                 style={({ pressed }) => [
                   styles.btn,
-                  styles.btnPlay,
-                  styles.playBtnWrap,
-                  hoveredBtn === 'play' && styles.btnHover,
+                  // styles.btnPlay,
+                  // styles.playBtnWrap,
+                  // hoveredBtn === 'play' && styles.btnHover,
                   pressed && styles.btnPressed,
                 ]}
-                onPressIn={() => setPlayPressed(true)}
-                onPressOut={() => setPlayPressed(false)}>
+                onPress={async () => {
+                  // Await so the video plays fully before navigation starts.
+                  // Without this the overlay and navigation race and the overlay
+                  // can end up covering the lobby with no way to dismiss it.
+                  await showTransition();
+                  router.push('/(tabs)/lobby');
+                }}>
                 <View style={styles.playBtnClip}>
                   <ImageBackground
-                    source={
-                      playPressed
-                        ? require('@/assets/images/buttons/play-btn-pressed.png')
-                        : require('@/assets/images/buttons/play-btn.png')
-                    }
+                    source={require('@/assets/images/buttons/play-btn.png')}
                     style={styles.playBtnBg}
                     resizeMode="stretch">
-                    <View style={styles.playBtnTextWrap}>
-                      <Text style={[styles.btnText, styles.btnTextPlay]}>PLAY</Text>
-                    </View>
                   </ImageBackground>
                 </View>
               </Pressable>
-            </Link>
           </View>
-          <View
+          {/* <View
             style={[styles.btnWrapper, styles.otherBtnWrapper]}
             {...({
               onMouseEnter: () => setHoveredBtn('private'),
@@ -106,16 +92,18 @@ export default function HomeScreen() {
             } as any)}>
             <Pressable
               style={({ pressed }) => [
-                styles.btn,
-                hoveredBtn === 'private' && styles.btnHover,
+                styles.settingsMenuBtn,
                 pressed && styles.btnPressed,
-              ]}>
-              <View style={styles.btnInner}>
-                <Text style={styles.btnText}>PRIVATE ROOM</Text>
-              </View>
+              ]}
+              onPress={() => router.push('/(tabs)/settings')}>
+              <ImageBackground
+                source={require('@/assets/images/buttons/settings-btn.png')}
+                style={styles.settingsMenuBtnBg}
+                resizeMode="stretch"
+              />
             </Pressable>
-          </View>
-          <View
+          </View> */}
+          {/* <View
             style={[styles.btnWrapper, styles.otherBtnWrapper]}
             {...({
               onMouseEnter: () => setHoveredBtn('leaderboard'),
@@ -131,7 +119,7 @@ export default function HomeScreen() {
                 <Text style={styles.btnText}>LEADERBOARD</Text>
               </View>
             </Pressable>
-          </View>
+          </View> */}
         </View>
       </View>
 
@@ -164,27 +152,6 @@ const btnBorderGlowBottom = neonCyan;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  neonBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: neonCyan,
-    opacity: 0.95,
-    ...Platform.select({
-      ios: {
-        shadowColor: neonCyan,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.9,
-        shadowRadius: 10,
-      },
-      android: {
-        elevation: 12,
-        shadowColor: neonCyan,
-      },
-      default: {},
-    }),
   },
   content: {
     flex: 1,
@@ -220,9 +187,13 @@ const styles = StyleSheet.create({
     minHeight: 56,
     backgroundColor: btnBg,
     paddingVertical: 4,
-    paddingHorizontal: 4,
-    borderRadius: 28,
-    borderWidth: 2,
+    borderLeftWidth: 20,
+    borderRightWidth: 20,
+    borderTopWidth: 20,
+    borderBottomWidth: 20,
+    // paddingHorizontal: 4,
+    borderRadius: 248,
+    borderWidth: 0,
     borderTopColor: btnBorderGlowTop,
     borderBottomColor: btnBorderGlowBottom,
     borderLeftColor: neonCyan,
@@ -251,18 +222,12 @@ const styles = StyleSheet.create({
   btnPlay: {
     minHeight: 88,
     borderRadius: 44,
-    borderWidth: 2,
+    borderWidth: 0,
     backgroundColor: 'transparent',
-    borderTopColor: gold,
-    borderBottomColor: btnBorderGlowBottom,
-    borderLeftColor: neonCyan,
-    borderRightColor: neonCyan,
     ...Platform.select({
       ios: {
         shadowColor: neonCyan,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 1,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 0 }
       },
       android: {
         elevation: 20,
@@ -271,8 +236,6 @@ const styles = StyleSheet.create({
       default: {
         shadowColor: neonCyan,
         shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.95,
-        shadowRadius: 16,
       },
     }),
   },
@@ -305,6 +268,17 @@ const styles = StyleSheet.create({
   },
   playBtnWrap: {
     overflow: 'hidden',
+  },
+  settingsMenuBtn: {
+    width: '80%',
+    alignSelf: 'center',
+    height: 80,
+    overflow: 'hidden',
+    borderRadius: 12,
+  },
+  settingsMenuBtnBg: {
+    width: '100%',
+    height: '100%',
   },
   playBtnClip: {
     flex: 1,

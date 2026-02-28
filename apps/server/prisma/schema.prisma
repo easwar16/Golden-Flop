@@ -1,0 +1,214 @@
+// GoldenFlop – Prisma schema
+// Database: PostgreSQL
+// Run:  npx prisma migrate dev --name init
+//       npx prisma generate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique   // base58 Solana public key
+  username      String?
+  avatar        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  balances    InternalBalance[]
+  deposits    Deposit[]
+  withdrawals Withdrawal[]
+  gameResults GameResult[]    @relation("GameResultWinner")
+  sessions    Session[]
+  payouts     Payout[]
+
+  @@index([walletAddress])
+}
+
+// ─── Session ──────────────────────────────────────────────────────────────────
+// Tracks issued JWTs for audit trail and future token revocation.
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   // SHA-256 hash of the JWT (never store raw tokens)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+// ─── Internal off-chain balance ───────────────────────────────────────────────
+// Denominated in lamports (1 SOL = 1_000_000_000 lamports).
+// BigInt avoids floating-point errors for financial amounts.
+// One row per user per token type.
+
+model InternalBalance {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenType   TokenType @default(SOL)
+  balance     BigInt    @default(0)
+  lastUpdated DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tokenType])
+  @@index([userId])
+}
+
+// ─── Deposit ──────────────────────────────────────────────────────────────────
+
+model Deposit {
+  id                   String        @id @default(cuid())
+  userId               String
+  tokenType            TokenType
+  amount               BigInt        // lamports or SPL token smallest unit
+  transactionSignature String        @unique  // on-chain tx signature
+  status               DepositStatus @default(PENDING)
+  createdAt            DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([transactionSignature])
+  @@index([status])
+}
+
+// ─── Withdrawal ───────────────────────────────────────────────────────────────
+
+model Withdrawal {
+  id                String           @id @default(cuid())
+  userId            String
+  tokenType         TokenType        @default(SOL)
+  amount            BigInt
+  destinationWallet String           // base58 recipient address
+  status            WithdrawalStatus @default(PENDING)
+  signature         String?          // on-chain tx signature once executed
+  createdAt         DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── Room ─────────────────────────────────────────────────────────────────────
+// Persisted room / table configuration. Predefined tables are synced on startup.
+
+model Room {
+  id             String    @id            // stable ID (e.g. "table-low-1")
+  name           String
+  tokenType      TokenType @default(SOL)
+  smallBlind     BigInt
+  bigBlind       BigInt
+  minBuyIn       BigInt
+  maxBuyIn       BigInt
+  maxPlayers     Int       @default(6)
+  rakePercentage Float     @default(2.5)  // e.g. 2.5 = 2.5%
+  rakeCap        BigInt    @default(0)    // max rake per hand (0 = no cap)
+  vaultAddress   String?                  // optional on-chain vault
+  isPremium      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  gameResults GameResult[]
+  payouts     Payout[]
+
+  @@index([tokenType])
+}
+
+// ─── Game result ──────────────────────────────────────────────────────────────
+
+model GameResult {
+  id        String   @id @default(cuid())
+  roomId    String
+  tableId   String                        // runtime table ID (may differ from Room.id for dynamic tables)
+  handId    String   @unique
+  players   Json     // Array<{ playerId, name, seatIndex, startChips, endChips, winAmount }>
+  winnerId  String
+  potSize   BigInt
+  rake             BigInt           @default(0)
+  settlementStatus SettlementStatus @default(OFF_CHAIN)
+  createdAt        DateTime         @default(now())
+
+  winner User @relation("GameResultWinner", fields: [winnerId], references: [id])
+  room   Room @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+  @@index([tableId])
+  @@index([winnerId])
+  @@index([createdAt])
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum TokenType {
+  SOL
+  SEEKER
+}
+
+enum DepositStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum PayoutType {
+  CASH_OUT
+  RAKE
+  REFUND
+}
+
+enum PayoutStatus {
+  PENDING
+  SENT
+  CONFIRMED
+  FAILED
+}
+
+enum SettlementStatus {
+  OFF_CHAIN
+  PENDING
+  SETTLED
+  FAILED
+}
+
+// ─── Payout ─────────────────────────────────────────────────────────────────
+// Records on-chain transfers from room vaults to players or treasury.
+
+model Payout {
+  id                   String       @id @default(cuid())
+  roomId               String
+  userId               String
+  type                 PayoutType   // CASH_OUT | RAKE | REFUND
+  amount               BigInt
+  transactionSignature String?      @unique
+  status               PayoutStatus @default(PENDING)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([status])
+  @@index([transactionSignature])
+}

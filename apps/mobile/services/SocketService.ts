@@ -15,17 +15,10 @@ import { useLobbyStore } from '../stores/useLobbyStore';
 import { useSocketStore } from '../stores/useSocketStore';
 
 // ─── Server address ───────────────────────────────────────────────────────────
-// • Simulator:      localhost works fine
-// • Physical device: must be your machine's LAN IP (same Wi-Fi network)
-//   Run: ifconfig | grep "inet " | grep -v 127.0.0.1   → e.g. 192.168.1.32
-import { Platform } from 'react-native';
-const DEV_HOST =
-  Platform.OS === 'android'
-    ? '10.0.2.2'          // Android emulator loopback → host machine
-    : '192.168.1.71';     // ← your LAN IP (update if your network changes)
-const SERVER_URL = __DEV__
-  ? `http://${DEV_HOST}:4000`
-  : 'https://your-production-server.com';
+// Set EXPO_PUBLIC_SERVER_URL in .env.local (gitignored).
+// Physical device: use your machine's LAN IP, e.g. http://192.168.x.x:4000
+// Simulator/emulator: http://localhost:4000
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4000';
 
 // ─── Types (mirrors @goldenflop/shared events) ────────────────────────────────
 
@@ -48,7 +41,13 @@ class SocketServiceClass {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
-  connect(playerId: string, playerName: string): void {
+  /**
+   * @param playerId    local UUID (game identity)
+   * @param playerName  display name
+   * @param avatarSeed  seed string for deterministic avatar generation
+   * @param jwtToken    optional JWT from AuthContext — enables balance checks
+   */
+  connect(playerId: string, playerName: string, avatarSeed?: string | null, jwtToken?: string | null): void {
     if (this.socket?.connected) return;
 
     useSocketStore.getState().setStatus('connecting');
@@ -59,7 +58,14 @@ class SocketServiceClass {
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1_000,
       reconnectionDelayMax: 10_000,
-      auth: { playerId, playerName },
+      // token is optional: present = authenticated player with balance checks
+      //                    absent  = guest/practice mode
+      auth: {
+        playerId,
+        playerName,
+        ...(avatarSeed ? { avatarSeed } : {}),
+        ...(jwtToken ? { token: jwtToken } : {}),
+      },
     });
 
     this.bindEvents();
@@ -101,13 +107,13 @@ class SocketServiceClass {
     });
   }
 
-  async sitAtSeat(tableId: string, buyIn: number, seatIndex?: number): Promise<{ seatIndex: number } | { error: string }> {
+  async sitAtSeat(tableId: string, buyIn: number, seatIndex?: number, avatarSeed?: string, playerName?: string): Promise<{ seatIndex: number } | { error: string }> {
     return new Promise((resolve) => {
       if (!this.socket) { resolve({ error: 'Not connected' }); return; }
       useGameStore.getState().setIsJoining(true);
       this.socket.emit(
         'sit_at_seat',
-        { tableId, buyIn, seatIndex },
+        { tableId, buyIn, seatIndex, avatarSeed, playerName },
         (res: { seatIndex: number } | { error: string }) => {
           if ('error' in res) {
             useGameStore.getState().setIsJoining(false);
@@ -183,6 +189,11 @@ class SocketServiceClass {
 
     s.on('tables_list', (tables) => {
       useLobbyStore.getState().setTables(tables);
+    });
+
+    // When any player joins, re-request table state so observers see the updated seats
+    s.on('player_joined', (payload: { tableId: string }) => {
+      s.emit('watch_table', { tableId: payload.tableId });
     });
 
     // ── Diagnostics ──────────────────────────────────────────────────────
