@@ -18,6 +18,8 @@ export interface LobbyTable {
   playerCount: number;
   maxPlayers: number;
   phase: string;
+  turnTimeoutMs: number;
+  isPractice: boolean;
   occupiedSeats: number[];
   reservedSeats?: number[];
 }

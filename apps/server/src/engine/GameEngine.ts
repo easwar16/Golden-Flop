@@ -192,6 +192,9 @@ export function processAction(
       amount = toCall;
       s = applyBet(s, playerIndex, toCall, false);
       s.players[playerIndex].hasActed = true;
+      if (s.players[playerIndex].chips === 0) {
+        s.players[playerIndex].isAllIn = true;
+      }
       break;
     }
 
@@ -200,10 +203,12 @@ export function processAction(
         throw new Error('Cannot raise with zero balance');
       }
       if (raiseAmount === undefined) throw new Error('raise requires an amount');
-      const minRaise = calcMinRaise(s);
+      // minRaiseTo = minimum total bet level; minAdditional = extra chips this player must add
+      const minRaiseTo = calcMinRaise(s);
+      const minAdditional = Math.max(0, minRaiseTo - s.players[playerIndex].currentBet);
       const maxRaise = s.players[playerIndex].chips;
-      if (raiseAmount < minRaise && raiseAmount < maxRaise) {
-        throw new Error(`Raise must be at least ${minRaise}`);
+      if (raiseAmount < minAdditional && raiseAmount < maxRaise) {
+        throw new Error(`Raise must be at least ${minAdditional}`);
       }
       const clamped = Math.min(raiseAmount, maxRaise);
       amount = clamped;
@@ -215,6 +220,9 @@ export function processAction(
       });
       s = applyBet(s, playerIndex, clamped, true);
       s.players[playerIndex].hasActed = true;
+      if (s.players[playerIndex].chips === 0) {
+        s.players[playerIndex].isAllIn = true;
+      }
       break;
     }
 

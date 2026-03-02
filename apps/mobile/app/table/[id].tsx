@@ -20,6 +20,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -66,11 +67,21 @@ const gold = '#FFD700';
 
 function formatSol(lamports: number): string {
   const sol = lamports / 1_000_000_000;
-  if (sol >= 1_000) return `${(sol / 1_000).toFixed(1)}K ◎`;
-  if (sol >= 1) return `${sol.toFixed(2)} ◎`;
-  if (sol >= 0.01) return `${sol.toFixed(2)} ◎`;
-  if (sol > 0) return `${sol.toFixed(4)} ◎`;
-  return '0 ◎';
+  if (sol === 0) return '0 ◎';
+  // Show up to 9 decimals (lamport precision), strip trailing zeros
+  const str = sol.toFixed(9).replace(/\.?0+$/, '');
+  return `${str} ◎`;
+}
+
+function formatChips(chips: number): string {
+  if (chips >= 1_000_000) return `${(chips / 1_000_000).toFixed(1)}M`;
+  if (chips >= 1_000) return `${Math.round(chips).toLocaleString()}`;
+  return `${Math.round(chips)}`;
+}
+
+/** Returns the right formatter based on whether the table uses practice chips or SOL. */
+function getFormatter(isPractice: boolean): (value: number) => string {
+  return isPractice ? formatChips : formatSol;
 }
 
 // Seat positions are computed dynamically in the component from screen dimensions.
@@ -138,6 +149,7 @@ interface SeatSlotProps {
   isTaken: boolean; // seat is occupied but we don't have full data yet
   reservation?: { seatIndex: number; playerId: string; playerName: string; avatarSeed: string };
   onJoin: (seatIndex: number) => void;
+  formatValue: (v: number) => string;
 }
 
 const SeatSlot = memo(function SeatSlot({
@@ -149,6 +161,7 @@ const SeatSlot = memo(function SeatSlot({
   isTaken,
   reservation,
   onJoin,
+  formatValue,
 }: SeatSlotProps) {
   // Read only this seat from the store to prevent re-renders when other seats change
   const seat = useGameStore((s) => s.seats[seatIndex]);
@@ -174,9 +187,11 @@ const SeatSlot = memo(function SeatSlot({
       {/* Pulsing glow behind active player's avatar */}
       {isActive && <ActiveGlow progress={timerProgress} size={64} />}
 
-      {/* Avatar */}
+      {/* Avatar (dimmed if sitting out or disconnected) */}
       {seat ? (
-        <PixelAvatar seed={seed} size={56} borderRadius={25} />
+        <View style={seat.isSittingOut ? { opacity: 0.4 } : undefined}>
+          <PixelAvatar seed={seed} size={56} borderRadius={25} />
+        </View>
       ) : reservation ? (
         <View style={{ opacity: 0.45 }}>
           <PixelAvatar seed={reservation.avatarSeed} size={56} borderRadius={25} />
@@ -221,9 +236,13 @@ const SeatSlot = memo(function SeatSlot({
       {seat ? (
         <View style={slotStyles.info}>
           <Text style={slotStyles.name} numberOfLines={1}>{displayName}</Text>
-          <Text style={slotStyles.chips}>{formatSol(seat.chips)}</Text>
+          <Text style={slotStyles.chips}>{formatValue(seat.chips)}</Text>
           {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
           {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
+          {seat.isSittingOut && !seat.isFolded && <Text style={slotStyles.sitOutLabel}>SIT OUT</Text>}
+          {seat.currentBet > 0 && !seat.isFolded && (
+            <Text style={slotStyles.betLabel}>{seat.isAllIn ? 'ALL IN' : formatValue(seat.currentBet)}</Text>
+          )}
         </View>
       ) : reservation ? (
         <View style={slotStyles.info}>
@@ -295,11 +314,16 @@ const slotStyles = StyleSheet.create({
     maxWidth: 96, textAlign: 'center',
   },
   chips: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#00FFAA',
-    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FF88',
+    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
   allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FF6B6B' },
   foldedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.4)' },
+  sitOutLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: '#FF9944' },
+  betLabel: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#FFE066',
+    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,6 +427,7 @@ const gaStyles = StyleSheet.create({
 interface BuyInModalProps {
   visible: boolean;
   seatIndex: number;
+  isPractice?: boolean;
   tableId: string;
   minBuyIn: number;
   maxBuyIn: number;
@@ -414,7 +439,7 @@ function lamportsToSol(lamports: number): string {
 }
 
 const BuyInModal = memo(function BuyInModal({
-  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose,
+  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose, isPractice,
 }: BuyInModalProps) {
   // Input is in SOL (e.g. "0.05"), converted to lamports on confirm
   const [amount, setAmount] = useState(lamportsToSol(minBuyIn));
@@ -442,18 +467,46 @@ const BuyInModal = memo(function BuyInModal({
   }, [onClose]);
 
   const handleConfirm = useCallback(async () => {
-    const solAmount = parseFloat(amount);
-    if (isNaN(solAmount) || solAmount <= 0) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Enter a valid SOL amount` });
-      return;
+    let buyIn: number;
+    if (isPractice) {
+      buyIn = parseInt(amount, 10);
+      if (isNaN(buyIn) || buyIn <= 0) {
+        setAlert({ title: 'INVALID AMOUNT', message: 'Enter a valid chip amount' });
+        return;
+      }
+    } else {
+      const solAmount = parseFloat(amount);
+      if (isNaN(solAmount) || solAmount <= 0) {
+        setAlert({ title: 'INVALID AMOUNT', message: 'Enter a valid SOL amount' });
+        return;
+      }
+      buyIn = Math.round(solAmount * 1_000_000_000);
     }
-    const buyIn = Math.round(solAmount * 1_000_000_000);
     if (buyIn < minBuyIn) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
+      setAlert({ title: 'INVALID AMOUNT', message: isPractice
+        ? `Minimum buy-in is ${minBuyIn.toLocaleString()} chips`
+        : `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
       return;
     }
     if (buyIn > maxBuyIn) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
+      setAlert({ title: 'INVALID AMOUNT', message: isPractice
+        ? `Maximum buy-in is ${maxBuyIn.toLocaleString()} chips`
+        : `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
+      return;
+    }
+
+    // Practice tables: skip wallet/tx — just sit with free chips
+    if (isPractice) {
+      setSending(true);
+      try {
+        onClose();
+        const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
+        if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
+      } catch (e) {
+        setAlert({ title: 'JOIN FAILED', message: e instanceof Error ? e.message : String(e) });
+      } finally {
+        setSending(false);
+      }
       return;
     }
 
@@ -519,7 +572,9 @@ const BuyInModal = memo(function BuyInModal({
                 <Text style={bimStyles.title}>BUY IN</Text>
                 <Text style={bimStyles.sub}>Seat {seatIndex + 1}</Text>
                 <Text style={bimStyles.range}>
-                  {lamportsToSol(minBuyIn)} – {lamportsToSol(maxBuyIn)} SOL
+                  {isPractice
+                    ? `${minBuyIn.toLocaleString()} – ${maxBuyIn.toLocaleString()} chips`
+                    : `${lamportsToSol(minBuyIn)} – ${lamportsToSol(maxBuyIn)} SOL`}
                 </Text>
                 <TextInput
                   style={bimStyles.input}
@@ -681,10 +736,13 @@ interface ChipSweepProps {
   target: { x: number; y: number };
   winAmount: number;
   handName: string;
+  winnerName: string;
+  bestHandCards: CardValue[];
   onComplete: () => void;
+  formatValue: (v: number) => string;
 }
 
-const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete }: ChipSweepProps) {
+const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, winnerName, bestHandCards, onComplete, formatValue }: ChipSweepProps) {
   const chips = useRef(
     Array.from({ length: CHIP_COUNT }, () => ({
       x: new Animated.Value(origin.x),
@@ -699,6 +757,8 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
   const handNameOpacity = useRef(new Animated.Value(0)).current;
   const handNameScale = useRef(new Animated.Value(0.4)).current;
   const handNameY = useRef(new Animated.Value(0)).current;
+  const cardsOpacity = useRef(new Animated.Value(0)).current;
+  const cardsScale = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
     const chipAnims = chips.map((chip, i) => {
@@ -740,14 +800,24 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
         Animated.timing(handNameOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.timing(handNameScale, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
       ]),
-      Animated.delay(900),
+      Animated.delay(1400),
       Animated.parallel([
         Animated.timing(handNameOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
         Animated.timing(handNameY, { toValue: -18, duration: 300, useNativeDriver: true }),
       ]),
     ]);
 
-    Animated.parallel([...chipAnims, labelAnim, handNameAnim]).start(() => onComplete());
+    const cardsAnim = Animated.sequence([
+      Animated.delay(200),
+      Animated.parallel([
+        Animated.timing(cardsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.timing(cardsScale, { toValue: 1, duration: 300, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
+      ]),
+      Animated.delay(1200),
+      Animated.timing(cardsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]);
+
+    Animated.parallel([...chipAnims, labelAnim, handNameAnim, cardsAnim]).start(() => onComplete());
   }, []);
 
   return (
@@ -817,8 +887,42 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
           zIndex: 60,
         }}
       >
-        +{formatSol(winAmount)}
+        +{formatValue(winAmount)}
       </Animated.Text>
+
+      {/* Winning hand cards + winner name — centered on screen */}
+      {bestHandCards.length > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: origin.x - 130,
+            top: origin.y + 20,
+            width: 260,
+            alignItems: 'center',
+            opacity: cardsOpacity,
+            transform: [{ scale: cardsScale }],
+            zIndex: 58,
+          }}
+        >
+          <Text style={{
+            fontFamily: 'PressStart2P_400Regular',
+            fontSize: 8,
+            color: '#FFF',
+            marginBottom: 6,
+            textShadowColor: '#000',
+            textShadowOffset: { width: 0, height: 1 },
+            textShadowRadius: 4,
+          }}>
+            {winnerName.toUpperCase()} WINS
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            {bestHandCards.map((card, i) => (
+              <PokerCard key={i} card={card} style={{ width: 38, height: 54 }} />
+            ))}
+          </View>
+        </Animated.View>
+      )}
     </>
   );
 });
@@ -856,52 +960,67 @@ const pbStyles = StyleSheet.create({
 // Raise amount input
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface RaiseInputProps { min: number; max: number; value: number; onChange: (v: number) => void; }
+interface RaiseInputProps { min: number; max: number; value: number; onChange: (v: number) => void; isPractice?: boolean; }
 
-/** All props (min, max, value, onChange) are in lamports. Display is in SOL. */
-const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onChange }: RaiseInputProps) {
-  const toSol = (lamports: number) => lamports / LAMPORTS_PER_SOL;
-  const toLamports = (sol: number) => Math.round(sol * LAMPORTS_PER_SOL);
-  const fmtSol = (lamports: number) => {
-    const sol = toSol(lamports);
-    if (sol >= 1) return sol.toFixed(2);
-    if (sol >= 0.01) return sol.toFixed(2);
-    if (sol > 0) return sol.toFixed(4);
+/** For SOL tables: values are in lamports, display in SOL. For practice: values are raw chips. */
+const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onChange, isPractice = false }: RaiseInputProps) {
+  const toDisplay = isPractice ? (v: number) => v : (lamports: number) => lamports / LAMPORTS_PER_SOL;
+  const toInternal = isPractice ? (v: number) => Math.round(v) : (sol: number) => Math.round(sol * LAMPORTS_PER_SOL);
+  const fmtDisplay = (internal: number) => {
+    const display = toDisplay(internal);
+    if (isPractice) return Math.round(display).toLocaleString();
+    if (display >= 1) return display.toFixed(2);
+    if (display >= 0.01) return display.toFixed(2);
+    if (display > 0) return display.toFixed(4);
     return '0';
   };
 
-  const [text, setText] = useState(fmtSol(value));
+  const [text, setText] = useState(fmtDisplay(value));
 
-  useEffect(() => { setText(fmtSol(value)); }, [value]);
+  useEffect(() => { setText(fmtDisplay(value)); }, [value]);
+
+  const handleTextChange = useCallback((t: string) => {
+    const cleaned = t.replace(/[^0-9.]/g, '');
+    setText(cleaned);
+    // Immediately sync valid values to the store so the RAISE button always uses the latest input
+    const n = parseFloat(cleaned);
+    if (!isNaN(n) && n > 0) {
+      const internal = toInternal(n);
+      const clamped = Math.max(min, Math.min(max, internal));
+      onChange(clamped);
+    }
+  }, [min, max, onChange]);
 
   const commit = useCallback(() => {
     const n = parseFloat(text);
     if (!isNaN(n) && n > 0) {
-      const lamports = toLamports(n);
-      const clamped = Math.max(min, Math.min(max, lamports));
+      const internal = toInternal(n);
+      const clamped = Math.max(min, Math.min(max, internal));
       onChange(clamped);
-      setText(fmtSol(clamped));
+      setText(fmtDisplay(clamped));
     } else {
-      setText(fmtSol(value));
+      setText(fmtDisplay(value));
     }
   }, [text, value, min, max, onChange]);
 
-  const currentLamports = (() => {
+  const currentInternal = (() => {
     const n = parseFloat(text);
-    return !isNaN(n) && n > 0 ? toLamports(n) : value;
+    return !isNaN(n) && n > 0 ? toInternal(n) : value;
   })();
 
+  const minStep = isPractice ? 1 : toInternal(0.0001);
+
   const dec = useCallback(() => {
-    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
-    const next = Math.max(min, currentLamports - step);
-    onChange(next); setText(fmtSol(next));
-  }, [currentLamports, min, onChange]);
+    const step = Math.max(minStep, Math.round(currentInternal * 0.10));
+    const next = Math.max(min, currentInternal - step);
+    onChange(next); setText(fmtDisplay(next));
+  }, [currentInternal, min, minStep, onChange]);
 
   const inc = useCallback(() => {
-    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
-    const next = Math.min(max, currentLamports + step);
-    onChange(next); setText(fmtSol(next));
-  }, [currentLamports, max, onChange]);
+    const step = Math.max(minStep, Math.round(currentInternal * 0.10));
+    const next = Math.min(max, currentInternal + step);
+    onChange(next); setText(fmtDisplay(next));
+  }, [currentInternal, max, minStep, onChange]);
 
   return (
     <View style={riStyles.wrap}>
@@ -914,7 +1033,7 @@ const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onCha
         <TextInput
           style={riStyles.input}
           value={text}
-          onChangeText={(t) => setText(t.replace(/[^0-9.]/g, ''))}
+          onChangeText={handleTextChange}
           onBlur={commit} onSubmitEditing={commit}
           keyboardType="decimal-pad" selectTextOnFocus showSoftInputOnFocus
         />
@@ -1003,6 +1122,8 @@ export default function TableScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const isPractice = id.startsWith('practice-');
+  const fmtValue = useMemo(() => getFormatter(isPractice), [isPractice]);
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
   // Top bar: safe-area + 6 margin + ~52px bar = insets.top + 58
@@ -1016,7 +1137,7 @@ export default function TableScreen() {
   // Seat positions: absolute coords inside the main container
   // 0=top-center, 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right, 5=bottom-center
   const SEAT_POSITIONS = [
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.03), left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
+    { top: TABLE_TOP , left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
     { top: TABLE_TOP + Math.round(TABLE_H * 0.20), left: 4 }, // 1 top-left
     { top: TABLE_TOP + Math.round(TABLE_H * 0.20), right: 4 }, // 2 top-right
     { top: TABLE_TOP + Math.round(TABLE_H * 0.53), left: 4 }, // 3 bottom-left
@@ -1047,8 +1168,13 @@ export default function TableScreen() {
   // Must be before any early return (Rules of Hooks)
   const lobbyTables = useLobbyStore((s) => s.tables);
 
+  // Check if the local player is sitting out
+  const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
+  const iAmSittingOut = mySeat?.isSittingOut ?? false;
+
   const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
-  const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt));
+  const turnTimeoutMs = useGameStore((s) => s.turnTimeoutMs);
+  const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt), turnTimeoutMs);
 
   const { hideTransition } = useTransition();
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
@@ -1060,13 +1186,8 @@ export default function TableScreen() {
   const [cashOutAlert, setCashOutAlert] = useState<{ title: string; message: string } | null>(null);
   const leftAlreadyRef = useRef(false);
 
-  // ── Auto-navigate away when kicked (busted out) ─────────────────────────
+  // ── Busted out — player stays as spectator ──────────────────────────────
   const kickedReason = useGameStore((s) => s.kickedReason);
-  useEffect(() => {
-    if (!kickedReason) return;
-    useGameStore.getState().clearKicked();
-    router.replace('/');
-  }, [kickedReason, router]);
 
 
   const onLayoutRoot = useCallback(async () => {
@@ -1088,6 +1209,7 @@ export default function TableScreen() {
   useEffect(() => {
     return () => {
       if (id && !leftAlreadyRef.current) SocketService.leaveTable(id);
+      useGameStore.getState().clearKicked();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1153,6 +1275,8 @@ export default function TableScreen() {
   }, []);
 
   const handleSeatPress = useCallback((seatIndex: number) => {
+    // Clear busted state so the player can re-join
+    useGameStore.getState().clearKicked();
     setBuyInModal({ visible: true, seatIndex });
   }, []);
 
@@ -1187,8 +1311,10 @@ export default function TableScreen() {
   }
 
   // ── Lobby data — used to show occupied seats before we have full table_state ─
+  // Once we have real seat data from table_state, stop using stale lobby data.
+  const hasTableState = seats.some(Boolean);
   const lobbyTable = lobbyTables.find((t) => t.id === id);
-  const lobbyOccupiedSeats: number[] = lobbyTable?.occupiedSeats ?? [];
+  const lobbyOccupiedSeats: number[] = hasTableState ? [] : (lobbyTable?.occupiedSeats ?? []);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const roomId = (id?.length ?? 0) > 8 ? `${id!.slice(0, 6)}…${id!.slice(-2)}` : (id ?? '—');
@@ -1239,6 +1365,7 @@ export default function TableScreen() {
           minBuyIn={tablMinBuyIn || 10_000_000}
           maxBuyIn={tablMaxBuyIn || 100_000_000}
           onClose={closeBuyIn}
+          isPractice={id.startsWith('practice-')}
         />
       )}
 
@@ -1250,7 +1377,10 @@ export default function TableScreen() {
           target={getSeatCenter(w.seatIndex)}
           winAmount={w.winAmount}
           handName={w.bestHandName}
+          winnerName={w.name}
+          bestHandCards={w.bestHandCards ?? []}
           onComplete={dismissHandResult}
+          formatValue={fmtValue}
         />
       ))}
 
@@ -1262,7 +1392,7 @@ export default function TableScreen() {
 
       {/* Table image — positioned between top bar and bottom controls */}
       <View style={[styles.tableArea, { marginTop:-90,top: TABLE_TOP, height: TABLE_H }]}>
-        <Image source={require('@/assets/images/table.png')} style={styles.tableImage} resizeMode="stretch" />
+        <Image source={require('@/assets/images/table.png')} style={styles.tableImage} resizeMode="contain" />
 
         {/* Community cards + phase badge + pot */}
         <View style={styles.communityOverlay}>
@@ -1282,7 +1412,7 @@ export default function TableScreen() {
               );
             })}
           </View>
-          {pot > 0 && phase !== 'preflop' && <Text style={styles.potLabel}>POT: {formatSol(pot)}</Text>}
+          {pot > 0 && <Text style={styles.potLabel}>POT: {fmtValue(pot)}</Text>}
 
           {/* Player's hole cards — shown below pot, only when in a hand */}
           {isInHand && mySeatIndex !== null && (
@@ -1320,6 +1450,7 @@ export default function TableScreen() {
               isTaken={!seats[v] && (lobbyOccupiedSeats.includes(v) || isReserved)}
               reservation={reservation}
               onJoin={handleSeatPress}
+              formatValue={fmtValue}
             />
           </View>
         );
@@ -1327,7 +1458,7 @@ export default function TableScreen() {
 
       {/* Top bar */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        {isMyTurn && (
+        {secondsLeft > 0 && (
           <View style={[styles.turnTimerWrap, secondsLeft <= 5 && styles.turnTimerWrapUrgent]}>
             <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
               {secondsLeft}s
@@ -1390,11 +1521,26 @@ export default function TableScreen() {
       />
 
       {/* Action bar — only when seated */}
-      {mySeatIndex !== null && (
+      {/* Busted-out spectator banner */}
+      {kickedReason && (
         <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={styles.bustedBanner}>
+            <Text style={styles.bustedText}>INSUFFICIENT BALANCE</Text>
+            <Text style={styles.bustedSub}>You are now spectating this table.</Text>
+          </View>
+        </View>
+      )}
 
-          {/* Action buttons — only rendered when it's my turn */}
-          {isMyTurn && (
+      {/* Action buttons — only when seated and not busted */}
+      {mySeatIndex !== null && !kickedReason && (
+        <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
+          {iAmSittingOut ? (
+            <Pressable
+              style={({ pressed }) => [styles.imBackBtn, pressed && { opacity: 0.8 }]}
+              onPress={() => SocketService.returnToTable(id)}>
+              <Text style={styles.imBackText}>I'M BACK</Text>
+            </Pressable>
+          ) : isMyTurn ? (
             <>
               <View style={styles.raiseRow}>
                 <RaiseAmountInput
@@ -1402,6 +1548,7 @@ export default function TableScreen() {
                   max={maxRaise}
                   value={Math.max(minRaise, Math.min(maxRaise, raiseAmount))}
                   onChange={setRaiseAmount}
+                  isPractice={isPractice}
                 />
               </View>
 
@@ -1411,7 +1558,7 @@ export default function TableScreen() {
                 onAction={handleAction}
               />
             </>
-          )}
+          ) : null}
         </View>
       )}
     </View>
@@ -1428,7 +1575,7 @@ const styles = StyleSheet.create({
   loadingText: { color: gold, fontSize: 14 },
 
   tableArea: { position: 'absolute', left: 0, right: 0, zIndex: 2 },
-  tableImage: { width: '110%', height: '100%', marginLeft: '-5%' },
+  tableImage: { width: '95%', height: '100%', alignSelf: 'center' },
 
   communityOverlay: {
     position: 'absolute', top: '42%',
@@ -1519,7 +1666,35 @@ const styles = StyleSheet.create({
   },
   holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
   holeCard: { width: 52, height: 74 },
+  bustedBanner: {
+    backgroundColor: 'rgba(26,10,46,0.92)',
+    borderWidth: 2, borderColor: '#FF4444', borderRadius: 14,
+    paddingHorizontal: 20, paddingVertical: 16,
+    alignItems: 'center', gap: 6,
+  },
+  bustedText: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#FF4444',
+    textShadowColor: 'rgba(255,0,0,0.4)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8,
+  },
+  bustedSub: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 1,
+  },
   raiseRow: { flexDirection: 'row', marginBottom: 12, paddingHorizontal: 4 },
+  imBackBtn: {
+    backgroundColor: '#00AA66',
+    borderWidth: 2, borderColor: '#00FFAA', borderRadius: 14,
+    paddingHorizontal: 32, paddingVertical: 16,
+    alignItems: 'center', alignSelf: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#00FFAA', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 10 },
+      android: { elevation: 8 }, default: {},
+    }),
+  },
+  imBackText: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 14, color: '#fff',
+    textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
 });
 
 // Leave-confirmation modal styles

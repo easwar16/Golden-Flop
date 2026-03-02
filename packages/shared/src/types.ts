@@ -40,6 +40,8 @@ export interface TableConfig {
   tokenMint: string;
   /** Premium tables require higher buy-ins; used for UI badging + future gating */
   isPremium: boolean;
+  /** Practice tables use free chips — no wallet or balance required */
+  isPractice?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,6 +60,10 @@ export interface SeatView {
   isFolded: boolean;
   isAllIn: boolean;
   isConnected: boolean;
+  /** Player is sitting out (timed out or disconnected, waiting to return) */
+  isSittingOut: boolean;
+  /** UTC ms when the player will be removed if they don't return (null if not sitting out) */
+  sitOutTimeoutAt: number | null;
   currentBet: number;   // amount bet in this betting round
   /** Hole cards: present only for recipient or at showdown */
   holeCards: (CardValue | null)[];
@@ -98,6 +104,9 @@ export interface TableStatePayload {
   /** UTC ms when the active player's clock expires – null if not their turn */
   turnTimeoutAt: number | null;
 
+  /** Turn duration in ms – varies by table speed (slow=45s, normal=30s, fast=15s) */
+  turnTimeoutMs: number;
+
   /** Seconds remaining in pre-game countdown (only set when phase === 'countdown') */
   countdownSeconds: number;
 
@@ -115,6 +124,9 @@ export interface TableStatePayload {
   bigBlind: number;
   minBuyIn: number;
   maxBuyIn: number;
+
+  /** Server's Date.now() when this payload was built – used to correct client clock skew */
+  serverTime: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +147,10 @@ export interface TableInfo {
   phase: GamePhase;
   tokenMint: string;
   isPremium: boolean;
+  /** Turn timeout in milliseconds — drives the lobby speed label */
+  turnTimeoutMs: number;
+  /** Practice tables use free chips — no wallet required */
+  isPractice: boolean;
   /** True for server-bootstrapped tables that persist when empty */
   isPersistent: boolean;
   /** Which seat indices are currently occupied (0-indexed) */

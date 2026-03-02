@@ -114,10 +114,14 @@ model Room {
   minBuyIn       BigInt
   maxBuyIn       BigInt
   maxPlayers     Int       @default(6)
+  turnTimeoutMs  Int       @default(30000)
+  tokenMint      String    @default("SOL")
   rakePercentage Float     @default(2.5)  // e.g. 2.5 = 2.5%
   rakeCap        BigInt    @default(0)    // max rake per hand (0 = no cap)
   vaultAddress   String?                  // optional on-chain vault
   isPremium      Boolean   @default(false)
+  isPractice     Boolean   @default(false)
+  isActive       Boolean   @default(true) // soft-disable tables without deleting
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

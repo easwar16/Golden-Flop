@@ -2,8 +2,8 @@
  * TableRegistry – owns the lifecycle of predefined 6-max tables.
  *
  * Responsibilities:
- *  - Create Room instances from DEFAULT_TABLES at startup
- *  - Register them with RoomManager as persistent
+ *  - Load active Room configs from the database at startup
+ *  - Create Room instances and register them with RoomManager as persistent
  *  - Restore seated players from Redis (chip counts survive a server restart)
  *  - Expose getTable / getAllTables for the socket layer
  *
@@ -16,10 +16,11 @@ import type {
   ServerToClientEvents,
   InterServerEvents,
   SocketData,
+  TableConfig,
 } from '@goldenflop/shared';
 import { Room } from '../room/Room';
 import { RoomManager } from '../room/RoomManager';
-import { DEFAULT_TABLES } from './definitions';
+import { prisma } from '../db/prisma';
 import { loadPlayers } from '../redis/TableStore';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -37,31 +38,44 @@ export class TableRegistry {
   // ─── Bootstrap ────────────────────────────────────────────────────────────
 
   /**
-   * Create all predefined tables and register them with RoomManager.
-   * Call once at server startup, after Redis is initialised.
+   * Load all active tables from the database and register them with RoomManager.
+   * Call once at server startup, after Redis and DB are initialised.
    */
   async bootstrap(): Promise<void> {
-    console.log('[table-registry] bootstrapping predefined tables…');
+    console.log('[table-registry] bootstrapping tables from database…');
 
-    for (const def of DEFAULT_TABLES) {
-      // Create a persistent room with the hard-coded stable ID
+    const dbRooms = await prisma.room.findMany({ where: { isActive: true } });
+
+    for (const row of dbRooms) {
+      const config: TableConfig = {
+        smallBlind:    Number(row.smallBlind),
+        bigBlind:      Number(row.bigBlind),
+        minBuyIn:      Number(row.minBuyIn),
+        maxBuyIn:      Number(row.maxBuyIn),
+        maxPlayers:    row.maxPlayers,
+        turnTimeoutMs: row.turnTimeoutMs,
+        tokenMint:     row.tokenMint,
+        isPremium:     row.isPremium,
+        isPractice:    row.isPractice,
+      };
+
       const room = new Room(
         this.io,
-        def.id,
-        def.name,
+        row.id,
+        row.name,
         'system',       // creator = system
-        def.config,
+        config,
         true,           // isPersistent
       );
 
       // Restore any players that were seated before the server last restarted
-      await this.restorePlayersFromRedis(room, def.id);
+      await this.restorePlayersFromRedis(room, row.id);
 
-      this.tables.set(def.id, room);
+      this.tables.set(row.id, room);
       this.roomManager.registerPersistentRoom(room);
 
       console.log(
-        `[table-registry] ✓ ${def.name} (${def.id})` +
+        `[table-registry] ✓ ${row.name} (${row.id})` +
         (room.playerCount > 0 ? ` — restored ${room.playerCount} player(s)` : ''),
       );
     }

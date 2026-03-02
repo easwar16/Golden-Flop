@@ -103,11 +103,10 @@ function getTableBadge(t: LobbyTable, allTables: LobbyTable[]): TableBadge {
 
 // ─── Table speed ──────────────────────────────────────────────────────────────
 
-function getTableSpeed(bigBlind: number): string {
-  const bb = bigBlind / LAMPORTS_PER_SOL;
-  if (bb <= 0.001) return 'SLOW';
-  if (bb <= 0.005) return 'NORMAL';
-  return 'FAST';
+function getTableSpeed(turnTimeoutMs: number): string {
+  if (turnTimeoutMs <= 15_000) return 'FAST';
+  if (turnTimeoutMs <= 30_000) return 'NORMAL';
+  return 'SLOW';
 }
 
 // ─── Wallet address ───────────────────────────────────────────────────────────
@@ -212,166 +211,25 @@ function BuyInModal({ visible, tableName, tier, minBuyIn, maxBuyIn, amount, onCh
   );
 }
 
-// ─── Practice tables ──────────────────────────────────────────────────────────
+// ─── Practice tier mapping ────────────────────────────────────────────────────
 
-type PracticeConfig = {
-  id: string;
-  name: string;
-  description: string;
-  smallBlind: number;
-  bigBlind: number;
-  startingChips: number;
-  accentColor: string;
-  badge: string;
+const PRACTICE_TIERS: Record<string, Tier> = {
+  'practice-beginner':    { label: 'EASY',    accentColor: '#22c55e', borderColor: 'rgba(34,197,94,0.55)',   shadowColor: '#22c55e', isVip: false },
+  'practice-casual':      { label: 'FUN',     accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false },
+  'practice-advanced':    { label: 'INTENSE', accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false },
+  'practice-highroller':  { label: 'VIP',     accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  },
 };
 
-const PRACTICE_TABLES: PracticeConfig[] = [
-  {
-    id: 'practice-beginner',
-    name: 'BEGINNER TABLE',
-    description: 'Learn the ropes',
-    smallBlind: 5,
-    bigBlind: 10,
-    startingChips: 1000,
-    accentColor: '#22c55e',
-    badge: '🟢 EASY',
-  },
-  {
-    id: 'practice-casual',
-    name: 'CASUAL LOUNGE',
-    description: 'Chill & practice',
-    smallBlind: 25,
-    bigBlind: 50,
-    startingChips: 5000,
-    accentColor: '#00FFFF',
-    badge: '⭐ FUN',
-  },
-  {
-    id: 'practice-advanced',
-    name: 'ADVANCED ROOM',
-    description: 'Sharpen your strategy',
-    smallBlind: 100,
-    bigBlind: 200,
-    startingChips: 20000,
-    accentColor: '#FFD700',
-    badge: '🔥 INTENSE',
-  },
-  {
-    id: 'practice-highroller',
-    name: 'HIGH ROLLER',
-    description: 'No limits, no mercy',
-    smallBlind: 500,
-    bigBlind: 1000,
-    startingChips: 100000,
-    accentColor: '#BF5FFF',
-    badge: '👑 VIP',
-  },
-];
-
-function PracticeCard({ config, onJoin }: { config: PracticeConfig; onJoin: (c: PracticeConfig) => void }) {
-  const [pressed, setPressed] = useState(false);
-  return (
-    <Pressable
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
-      onPress={() => onJoin(config)}
-      style={[ps.card, { borderColor: config.accentColor + '88' }, pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }]}>
-      {/* Accent top bar */}
-      <View style={[ps.accentBar, { backgroundColor: config.accentColor }]} />
-      <View style={ps.cardBody}>
-        {/* Left: name + details */}
-        <View style={ps.cardLeft}>
-          <View style={ps.nameRow}>
-            <Text style={[ps.tableName, { color: config.accentColor }]}>{config.name}</Text>
-          </View>
-          <Text style={ps.description}>{config.description}</Text>
-          <View style={ps.statsRow}>
-            <Text style={ps.stat}>Blinds: {config.smallBlind}/{config.bigBlind}</Text>
-            <Text style={[ps.stat, ps.statSep]}>·</Text>
-            <Text style={ps.stat}>Start: {config.startingChips.toLocaleString()} chips</Text>
-          </View>
-          <View style={ps.badgeRow}>
-            <Text style={[ps.badgeText, { color: config.accentColor }]}>{config.badge}</Text>
-            <Text style={ps.freeChipsTag}>FREE CHIPS</Text>
-          </View>
-        </View>
-        {/* Right: join button */}
-        <Pressable
-          style={[ps.joinBtn, { borderColor: config.accentColor }]}
-          onPress={() => onJoin(config)}>
-          <Text style={[ps.joinBtnText, { color: config.accentColor }]}>JOIN</Text>
-        </Pressable>
-      </View>
-    </Pressable>
-  );
+function getPracticeTier(tableId: string): Tier {
+  return PRACTICE_TIERS[tableId] ?? { label: 'FUN', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false };
 }
 
-const ps = StyleSheet.create({
-  card: {
-    borderWidth: 1.5,
-    borderRadius: 14,
-    backgroundColor: 'rgba(20,10,40,0.82)',
-    overflow: 'hidden',
-    marginHorizontal: 2,
-  },
-  accentBar: { height: 3, width: '100%' },
-  cardBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  cardLeft: { flex: 1, gap: 5 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tableName: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 9,
-    letterSpacing: 0.5,
-  },
-  description: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 6,
-    color: 'rgba(255,255,255,0.55)',
-  },
-  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  stat: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 6,
-    color: 'rgba(255,255,255,0.6)',
-  },
-  statSep: { color: 'rgba(255,255,255,0.3)' },
-  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
-  badgeText: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 6,
-  },
-  freeChipsTag: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 5,
-    color: '#22c55e',
-    backgroundColor: 'rgba(34,197,94,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.4)',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  joinBtn: {
-    borderWidth: 1.5,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  joinBtnText: {
-    fontFamily: 'PressStart2P_400Regular',
-    fontSize: 8,
-    letterSpacing: 1,
-  },
-});
+const PRACTICE_NAMES: Record<string, string> = {
+  'practice-beginner':   'BEGINNER TABLE',
+  'practice-casual':     'CASUAL LOUNGE',
+  'practice-advanced':   'ADVANCED ROOM',
+  'practice-highroller': 'HIGH ROLLER',
+};
 
 // ─── Table card ───────────────────────────────────────────────────────────────
 
@@ -459,8 +317,9 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
     return { transform: [{ translateX }] };
   });
 
-  const speed     = getTableSpeed(t.bigBlind);
-  const avgPot    = Math.round(t.bigBlind * 4.5);
+  const isPractice = t.isPractice ?? false;
+  const speed     = getTableSpeed(t.turnTimeoutMs);
+  const avgPot    = isPractice ? Math.round(t.bigBlind * 4.5) : (t.bigBlind * 4.5) / LAMPORTS_PER_SOL;
   const speedColor = speed === 'SLOW' ? '#22c55e' : speed === 'NORMAL' ? '#EAB308' : '#FF6B35';
 
   return (
@@ -505,7 +364,12 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               <View style={[styles.tierBadge, { borderColor: tier.accentColor, backgroundColor: tier.accentColor + '22' }]}>
                 <Text style={[styles.tierBadgeText, { color: tier.accentColor }]}>{tier.label}</Text>
               </View>
-              {badge && (
+              {isPractice && (
+                <View style={[styles.tableBadge, { borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                  <Text style={[styles.tableBadgeText, { color: '#22c55e' }]}>FREE CHIPS</Text>
+                </View>
+              )}
+              {!isPractice && badge && (
                 <View style={[styles.tableBadge, { borderColor: badge.color, backgroundColor: badge.color + '22' }]}>
                   <Text style={[styles.tableBadgeText, { color: badge.color }]}>{badge.text}</Text>
                 </View>
@@ -513,7 +377,9 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
             </View>
 
             <Text style={styles.tableDetail}>
-              Blinds: {(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / {(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL
+              {isPractice
+                ? `Blinds: ${t.smallBlind}/${t.bigBlind} chips`
+                : `Blinds: ${(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / ${(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL`}
             </Text>
 
             <View style={styles.tableRow}>
@@ -523,14 +389,20 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </Text>
             </View>
 
-            <Text style={styles.tableDetail}>Min buy-in: {(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL</Text>
+            <Text style={styles.tableDetail}>
+              {isPractice
+                ? `Start: ${t.minBuyIn.toLocaleString()} chips`
+                : `Min buy-in: ${(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL`}
+            </Text>
 
             {/* Expanded details */}
             {expanded && (
               <View style={styles.expandedBlock}>
                 <View style={styles.expandedRow}>
                   <Text style={styles.expandedLabel}>AVG POT</Text>
-                  <Text style={styles.expandedValue}>{avgPot.toLocaleString()} chips</Text>
+                  <Text style={styles.expandedValue}>
+                    {isPractice ? `${avgPot.toLocaleString()} chips` : `${avgPot.toFixed(4)} SOL`}
+                  </Text>
                 </View>
                 <View style={styles.expandedRow}>
                   <Text style={styles.expandedLabel}>SPEED</Text>
@@ -681,9 +553,11 @@ export default function LobbyScreen() {
   }, [addressBase58, deauthorize, signOut]);
 
   // Table names are computed once per render cycle; reset counter first
+  // Only compute for non-practice tables (practice tables use PRACTICE_NAMES)
+  const solTables = useMemo(() => tables.filter((t) => !t.isPractice), [tables]);
   const tableNames = useMemo(() => {
     const counts: Record<string, number> = {};
-    return tables.map((t) => {
+    return solTables.map((t) => {
       const tier = getTier(t.bigBlind);
       const key  = tier.label;
       const names = TIER_NAMES[key] ?? TIER_NAMES.LOW;
@@ -691,23 +565,9 @@ export default function LobbyScreen() {
       counts[key] = idx + 1;
       return names[idx % names.length];
     });
-  }, [tables]);
+  }, [solTables]);
 
   const handleJoin = useCallback(async (tableId: string) => {
-    await showTransition();
-    router.push(`/table/${tableId}`);
-  }, [showTransition, router]);
-
-  /** Join a practice table — creates a real server room with the config's blinds, no wallet needed. */
-  const handlePracticeJoin = useCallback(async (config: PracticeConfig) => {
-    const tableId = await SocketService.createTable({
-      name: config.name,
-      smallBlind: config.smallBlind,
-      bigBlind: config.bigBlind,
-      minBuyIn: config.startingChips,
-      maxBuyIn: config.startingChips * 2,
-    });
-    if (!tableId) return;
     await showTransition();
     router.push(`/table/${tableId}`);
   }, [showTransition, router]);
@@ -718,8 +578,13 @@ export default function LobbyScreen() {
     router.navigate({ pathname: '/(tabs)/settings', params: { connectWallet: '1' } });
   }, [router]);
 
-  /** Join a table directly — no modal. Redirects to settings if wallet not connected. */
+  /** Join a table directly — no modal. Redirects to settings if wallet not connected (SOL only). */
   const handleJoinPress = useCallback((t: LobbyTable) => {
+    // Practice tables don't require a wallet
+    if (t.isPractice) {
+      handleJoin(t.id);
+      return;
+    }
     // Read via ref so this callback never goes stale between re-renders
     if (!isWalletConnectedRef.current) {
       promptConnectWallet();
@@ -730,8 +595,8 @@ export default function LobbyScreen() {
 
   const handleQuickJoin = useCallback(() => {
     if (!isWalletConnectedRef.current) { promptConnectWallet(); return; }
-    if (!tables.length) return;
-    const joinable = tables.filter((t) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
+    if (!solTables.length) return;
+    const joinable = solTables.filter((t) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
     if (!joinable.length) return;
     const best = joinable.sort((a, b) => {
       const aScore = a.playerCount * 10 - a.bigBlind;
@@ -739,7 +604,7 @@ export default function LobbyScreen() {
       return bScore - aScore;
     })[0];
     handleJoin(best.id);
-  }, [isWalletConnected, promptConnectWallet, tables, handleJoin]);
+  }, [isWalletConnected, promptConnectWallet, solTables, handleJoin]);
 
   const handleCreate = async () => {
     const sb = parseInt(smallBlind, 10) || 10;
@@ -755,9 +620,18 @@ export default function LobbyScreen() {
 
   // Sort + filter
   const displayTables = useMemo<DisplayRow[]>(() => {
-    if (activeTab === 'PRACTICE') return [];
+    if (activeTab === 'PRACTICE') {
+      return tables
+        .filter((t) => t.isPractice)
+        .map((t) => ({
+          t,
+          name: PRACTICE_NAMES[t.id] ?? t.name,
+          tier: getPracticeTier(t.id),
+        }));
+    }
 
-    let list = tables.map((t, i) => ({ t, name: tableNames[i] ?? 'TABLE', tier: getTier(t.bigBlind) }));
+    let list = solTables
+      .map((t, i) => ({ t, name: tableNames[i] ?? 'TABLE', tier: getTier(t.bigBlind) }));
 
     if (joinableOnly) list = list.filter(({ t }) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
 
@@ -766,7 +640,7 @@ export default function LobbyScreen() {
     if (sortBy === 'BUY-IN')  list.sort((a, b) => a.t.minBuyIn - b.t.minBuyIn || a.t.id.localeCompare(b.t.id));
 
     return list;
-  }, [tables, tableNames, sortBy, joinableOnly, activeTab]);
+  }, [tables, solTables, tableNames, sortBy, joinableOnly, activeTab]);
 
   const renderItem = useCallback(({ item, index }: { item: DisplayRow; index: number }) => (
     <TableCard
@@ -789,19 +663,12 @@ export default function LobbyScreen() {
 
   const EmptyComponent = useCallback(() => (
     <View style={styles.emptyState}>
-      {activeTab === 'PRACTICE' ? (
-        <>
-          <Text style={styles.emptyStateTitle}>COMING SOON</Text>
-          <Text style={styles.emptyStateText}>Practice tables with{'\n'}free chips are on the way.</Text>
-        </>
-      ) : (
-        <>
-          <Text style={styles.emptyStateTitle}>NO TABLES</Text>
-          <Text style={styles.emptyStateText}>
-            {joinableOnly ? 'No joinable tables found.\nTry turning off the filter.' : 'No tables available right now.'}
-          </Text>
-        </>
-      )}
+      <Text style={styles.emptyStateTitle}>NO TABLES</Text>
+      <Text style={styles.emptyStateText}>
+        {activeTab === 'PRACTICE'
+          ? 'Practice tables are loading…'
+          : joinableOnly ? 'No joinable tables found.\nTry turning off the filter.' : 'No tables available right now.'}
+      </Text>
     </View>
   ), [activeTab, joinableOnly]);
 
@@ -862,43 +729,28 @@ export default function LobbyScreen() {
             onSort={setSortBy}
             joinableOnly={joinableOnly}
             onToggleJoinable={() => setJoinableOnly((v) => !v)}
-            totalCount={tables.length}
+            totalCount={solTables.length}
             shownCount={displayTables.length}
           />
         )}
 
-        {/* Practice tab: static rooms with free chips */}
-        {activeTab === 'PRACTICE' ? (
-          <FlatList
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            data={PRACTICE_TABLES}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <PracticeCard config={item} onJoin={handlePracticeJoin} />
-            )}
-            ItemSeparatorComponent={ItemSeparator}
-          />
-        ) : (
-          /* Solana tab: real tables from server */
-          <AnimatedFlatList
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            data={displayTables as any}
-            keyExtractor={keyExtractor as any}
-            renderItem={renderItem as any}
-            ItemSeparatorComponent={ItemSeparator}
-            ListEmptyComponent={EmptyComponent}
-            onScroll={scrollHandler as any}
-            scrollEventThrottle={16}
-            removeClippedSubviews={Platform.OS === 'android'}
-            initialNumToRender={6}
-            maxToRenderPerBatch={4}
-            windowSize={5}
-          />
-        )}
+        {/* Table list (both Solana and Practice use the same card component) */}
+        <AnimatedFlatList
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          data={displayTables as any}
+          keyExtractor={keyExtractor as any}
+          renderItem={renderItem as any}
+          ItemSeparatorComponent={ItemSeparator}
+          ListEmptyComponent={EmptyComponent}
+          onScroll={scrollHandler as any}
+          scrollEventThrottle={16}
+          removeClippedSubviews={Platform.OS === 'android'}
+          initialNumToRender={6}
+          maxToRenderPerBatch={4}
+          windowSize={5}
+        />
 
         {/* Hidden create form */}
         {false && showCreate && (

@@ -16,6 +16,7 @@ export interface CreateTablePayload {
   minBuyIn: number;
   maxBuyIn: number;
   maxPlayers?: number;
+  turnTimeoutMs?: number;
 }
 
 export interface JoinTablePayload {
@@ -70,6 +71,8 @@ export interface ClientToServerEvents {
   /** Release a previously reserved seat. */
   release_seat: (payload: ReleaseSeatPayload) => void;
   player_action: (payload: PlayerActionPayload) => void;
+  /** Player returns from sitting out */
+  return_to_table: (payload: { tableId: string }) => void;
   request_tables: () => void;
   /** Preferred alias for request_tables — returns the same tables_list event */
   get_tables: () => void;
@@ -117,6 +120,20 @@ export interface PlayerKickedPayload {
   reason: string;
 }
 
+export interface PlayerSitOutPayload {
+  tableId: string;
+  playerId: string;
+  seatIndex: number;
+  /** UTC ms when the player will be removed from the table */
+  timeoutAt: number;
+}
+
+export interface PlayerReturnedPayload {
+  tableId: string;
+  playerId: string;
+  seatIndex: number;
+}
+
 export interface ErrorPayload {
   code: string;
   message: string;
@@ -153,6 +170,10 @@ export interface ServerToClientEvents {
   seat_released: (payload: { tableId: string; seatIndex: number }) => void;
   /** Sent to a player who has been removed from the table (e.g. busted out) */
   player_kicked: (payload: PlayerKickedPayload) => void;
+  /** Broadcast when a player enters sit-out state */
+  player_sitting_out: (payload: PlayerSitOutPayload) => void;
+  /** Broadcast when a sitting-out player returns */
+  player_returned: (payload: PlayerReturnedPayload) => void;
   /** Error back to the requesting socket */
   error: (payload: ErrorPayload) => void;
   /** Sent on reconnect — same shape as table_state */

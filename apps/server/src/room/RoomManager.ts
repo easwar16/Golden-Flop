@@ -30,6 +30,13 @@ const DEFAULT_CONFIG: Omit<TableConfig, 'smallBlind' | 'bigBlind' | 'minBuyIn' |
   isPremium: false,
 };
 
+/** Derive turn timeout from big blind when not explicitly set. Matches seed tiers. */
+function deriveTurnTimeout(bigBlind: number): number {
+  if (bigBlind >= 20_000_000) return 15_000;   // high stakes (≥ 0.02 SOL BB) → fast
+  if (bigBlind >= 2_000_000) return 30_000;     // mid stakes (≥ 0.002 SOL BB) → normal
+  return 45_000;                                 // low stakes → slow
+}
+
 export class RoomManager {
   private rooms = new Map<string, Room>();
   private io: IO;
@@ -48,7 +55,7 @@ export class RoomManager {
       minBuyIn: payload.minBuyIn,
       maxBuyIn: payload.maxBuyIn,
       maxPlayers: payload.maxPlayers ?? DEFAULT_CONFIG.maxPlayers,
-      turnTimeoutMs: DEFAULT_CONFIG.turnTimeoutMs,
+      turnTimeoutMs: payload.turnTimeoutMs ?? deriveTurnTimeout(payload.bigBlind),
       tokenMint: DEFAULT_CONFIG.tokenMint,
       isPremium: DEFAULT_CONFIG.isPremium,
     };
@@ -100,13 +107,8 @@ export class RoomManager {
     const room = this.getRoomForSocket(socketId);
     if (!room) return;
 
-    // Immediately remove the player from the room on disconnect
-    room.leave(socketId);
-
-    // Only destroy non-persistent (dynamic) rooms when they become empty
-    if (room.playerCount === 0 && !room.isPersistent) {
-      this.deleteRoom(room.id);
-    }
+    // Mark as disconnected (NOT remove) — player gets 60s to reconnect
+    room.markDisconnected(socketId);
 
     this.broadcastLobby();
   }

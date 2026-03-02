@@ -195,6 +195,11 @@ class SocketServiceClass {
     this.socket.emit('player_action', { tableId, action, amount });
   }
 
+  /** Tell the server the player is back from sitting out. */
+  returnToTable(tableId: string): void {
+    this.socket?.emit('return_to_table', { tableId });
+  }
+
   // ── Event wiring ───────────────────────────────────────────────────────
 
   private bindEvents(): void {
@@ -250,8 +255,18 @@ class SocketServiceClass {
 
     s.on('player_kicked', (payload: { tableId: string; reason: string }) => {
       console.log('[socket] kicked from table:', payload.reason);
-      useGameStore.getState().reset();
+      // Don't reset — player stays as spectator and continues receiving table_state
       useGameStore.getState().setKicked(payload.reason);
+    });
+
+    s.on('player_sitting_out', (payload: { tableId: string; playerId: string; seatIndex: number; timeoutAt: number }) => {
+      console.log('[socket] player sitting out:', payload.playerId);
+      // table_state will carry the updated isSittingOut flag — no extra store action needed
+    });
+
+    s.on('player_returned', (payload: { tableId: string; playerId: string; seatIndex: number }) => {
+      console.log('[socket] player returned:', payload.playerId);
+      // table_state will carry the updated state — no extra store action needed
     });
 
     // ── Lobby events ─────────────────────────────────────────────────────

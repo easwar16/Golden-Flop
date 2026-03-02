@@ -22,9 +22,9 @@ import type {
 import { RoomManager } from '../room/RoomManager';
 import { TableRegistry } from '../table/TableRegistry';
 import { extractSocketUser } from '../auth/jwtMiddleware';
-import { processBuyIn, processCashOut } from '../balance/BalanceService';
+import { processBuyIn } from '../balance/BalanceService';
+import { settlePlayerBalance } from '../balance/settlePlayerBalance';
 import { verifySOLDepositToVault } from '../solana/SolanaService';
-import { processPlayerCashOut } from '../solana/PayoutService';
 import { prisma } from '../db/prisma';
 import { findOrCreateUser } from '../services/user.service';
 
@@ -328,6 +328,7 @@ export function registerSocketHandlers(
       const seatWallet = seat?.walletAddress ?? null;
       const seatUserId = seat?.userId ?? null;
       const seatIsVault = seat?.isVaultPlayer ?? false;
+      const isPractice = room.config.isPractice ?? false;
 
       // Remove player from the room immediately — don't block on payout
       room.leave(socket.id);
@@ -336,40 +337,18 @@ export function registerSocketHandlers(
       roomManager.broadcastLobby();
       console.log(`[room] ${playerId} left ${payload.tableId}`);
 
-      // Process payout after the player has been removed
-      if (cashOutAmount > 0) {
-        if (seatIsVault && seatWallet && seatUserId) {
-          // ── Vault flow: transfer from vault to player's wallet on-chain ──
-          try {
-            const sig = await processPlayerCashOut(
-              payload.tableId,
-              seatUserId,
-              seatWallet,
-              BigInt(cashOutAmount),
-            );
-            socket.emit('cash_out_complete', {
-              tableId: payload.tableId,
-              amount: cashOutAmount,
-              txSignature: sig,
-            });
-            if (sig) {
-              console.log(`[economy] vault cash-out: ${cashOutAmount} lamports → ${seatWallet} (tx: ${sig})`);
-            } else {
-              console.error(`[economy] vault cash-out FAILED for ${seatWallet}, ${cashOutAmount} lamports`);
-            }
-          } catch (err) {
-            console.error(`[economy] vault cash-out error:`, err);
-            socket.emit('cash_out_complete', {
-              tableId: payload.tableId,
-              amount: cashOutAmount,
-              txSignature: null,
-            });
-          }
-        } else if (userId) {
-          // ── Internal balance flow (existing) ──
-          await processCashOut(userId, BigInt(cashOutAmount));
-          console.log(`[economy] cashed out ${cashOutAmount} chips → userId:${userId}`);
-        }
+      // Process payout via shared settlement service
+      const { txSignature } = await settlePlayerBalance(
+        { userId: seatUserId, walletAddress: seatWallet, isVaultPlayer: seatIsVault, chips: cashOutAmount },
+        payload.tableId,
+        isPractice,
+      );
+      if (txSignature !== undefined) {
+        socket.emit('cash_out_complete', {
+          tableId: payload.tableId,
+          amount: cashOutAmount,
+          txSignature,
+        });
       }
     });
 
@@ -395,6 +374,17 @@ export function registerSocketHandlers(
         return;
       }
       room.handleAction(socket.id, payload.action, payload.amount);
+    });
+
+    // ── Return to table (from sit-out) ──────────────────────────────────
+
+    socket.on('return_to_table', (payload) => {
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) {
+        socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Table not found' });
+        return;
+      }
+      room.returnToTable(socket.id);
     });
 
     // ── Latency ping (client measures round-trip) ─────────────────────────

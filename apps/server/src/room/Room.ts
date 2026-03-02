@@ -41,16 +41,21 @@ import { savePlayers } from '../redis/TableStore';
 import { recordHandResult } from '../services/game.service';
 import { getRoom as getRoomConfig } from '../services/room.service';
 import { processRakeTransfer } from '../solana/PayoutService';
+import { settlePlayerBalance } from '../balance/settlePlayerBalance';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 const HAND_START_DELAY_MS = 5_000;   // pause after hand result before next deal
 const SHOWDOWN_REVEAL_MS = 5_000;    // time to show cards before distributing
 const RESERVATION_TIMEOUT_MS = 30_000; // auto-expire seat reservations after 30 seconds
+const SIT_OUT_TIMEOUT_MS = 60_000;   // 60 seconds before inactive player is removed
+const DISCONNECTED_FOLD_DELAY_MS = 2_000; // brief delay before auto-folding disconnected player
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seated player record (separate from EnginePlayer – Room concerns)
 // ─────────────────────────────────────────────────────────────────────────────
+
+export type PlayerPresenceState = 'active' | 'sitting_out' | 'disconnected';
 
 export interface RoomPlayer {
   id: string;
@@ -60,6 +65,12 @@ export interface RoomPlayer {
   chips: number;
   seatIndex: number;
   isConnected: boolean;
+  /** Current presence state — determines hand eligibility and removal timing. */
+  presenceState: PlayerPresenceState;
+  /** Handle for the 60-second sit-out removal timer (null when active). */
+  sitOutTimer: ReturnType<typeof setTimeout> | null;
+  /** UTC ms when this player will be removed if they don't return (null when active). */
+  sitOutTimeoutAt: number | null;
   /** Database user ID — null for guests. */
   userId?: string | null;
   /** Base58 wallet address — set when player joins via vault deposit. */
@@ -153,6 +164,8 @@ export class Room {
       phase: this.phase,
       tokenMint: this.config.tokenMint,
       isPremium: this.config.isPremium,
+      turnTimeoutMs: this.config.turnTimeoutMs,
+      isPractice: this.config.isPractice ?? false,
       isPersistent: this.isPersistent,
       occupiedSeats: [...this.seats.keys()],
       reservedSeats: [...this.reservations.keys()],
@@ -326,6 +339,9 @@ export class Room {
       chips: buyIn,
       seatIndex,
       isConnected: true,
+      presenceState: 'active',
+      sitOutTimer: null,
+      sitOutTimeoutAt: null,
       userId: opts?.userId ?? null,
       walletAddress: opts?.walletAddress ?? null,
       isVaultPlayer: opts?.isVaultPlayer ?? false,
@@ -353,8 +369,8 @@ export class Room {
     // Broadcast updated state to all seated players + observers in the room
     this.broadcastState();
 
-    // Start countdown when second player joins (if no hand running + not already counting)
-    if (this.seats.size >= 2 && !this.handState && !this.countdownTimer) {
+    // Start countdown when second active player joins (if no hand running + not already counting)
+    if (this.getActivePlayerCount() >= 2 && !this.handState && !this.countdownTimer) {
       this.startCountdown();
     }
 
@@ -367,6 +383,10 @@ export class Room {
    * empty string; once they reconnect the normal reconnect() path updates it.
    */
   restorePlayer(player: RoomPlayer): void {
+    // Ensure new fields are present for players restored from Redis
+    player.presenceState ??= 'active';
+    player.sitOutTimer ??= null;
+    player.sitOutTimeoutAt ??= null;
     this.seats.set(player.seatIndex, player);
     // Don't add to socketToSeat — socket is stale after a restart
   }
@@ -377,6 +397,9 @@ export class Room {
 
     const player = this.seats.get(seatIndex);
     if (!player) return;
+
+    // Clear any sit-out timer
+    this.clearSitOutTimer(player);
 
     this.seats.delete(seatIndex);
     this.socketToSeat.delete(socketId);
@@ -390,24 +413,33 @@ export class Room {
       seatIndex,
     });
 
-
-    // If it's the leaving player's turn, auto-fold them
+    // Handle active hand — fold the leaving player, never cancel/refund the hand
     if (this.handState) {
-      const ap = activePlayer(this.handState);
-      if (ap?.id === player.id) {
-        this.handleAutoFold(player.id);
-        return;
+      const ep = this.handState.players.find(p => p.id === player.id);
+      if (ep && !ep.isFolded && !ep.isAllIn) {
+        const ap = activePlayer(this.handState);
+        if (ap?.id === player.id) {
+          // Their turn — auto-fold (handles hand completion internally)
+          this.handleAutoFold(player.id);
+          return;
+        } else {
+          // Not their turn — mark folded directly in engine state
+          ep.isFolded = true;
+          // Check if only 1 active player remains → finish the hand
+          const remaining = this.handState.players.filter(p => !p.isFolded);
+          if (remaining.length <= 1) {
+            this.clearTurnTimer();
+            this.finishHand();
+            return;
+          }
+        }
       }
     }
 
-    // Cancel countdown if not enough players remain
-    if (this.seats.size < 2 && this.countdownTimer) {
+    // Cancel countdown if not enough active players remain
+    const activeCount = this.getActivePlayerCount();
+    if (activeCount < 2 && this.countdownTimer) {
       this.clearCountdown();
-    }
-
-    if (this.seats.size < 2 && this.handState) {
-      this.cancelHand();
-      return;
     }
 
     this.broadcastState();
@@ -424,6 +456,18 @@ export class Room {
         this.socketToSeat.set(socket.id, seatIndex);
         socket.join(this.id);
 
+        // Restore from disconnected/sitting_out → active
+        if (player.presenceState !== 'active') {
+          this.clearSitOutTimer(player);
+          player.presenceState = 'active';
+
+          this.io.to(this.id).emit('player_returned', {
+            tableId: this.id,
+            playerId: player.id,
+            seatIndex: player.seatIndex,
+          });
+        }
+
         // Update EnginePlayer if hand is running
         if (this.handState) {
           const ep = this.handState.players.find(p => p.id === playerId);
@@ -431,6 +475,12 @@ export class Room {
         }
 
         socket.emit('reconnect_state', this.buildStateFor(playerId));
+
+        // Check if we can start a hand now
+        if (this.getActivePlayerCount() >= 2 && !this.handState && !this.countdownTimer) {
+          this.startCountdown();
+        }
+
         return true;
       }
     }
@@ -453,6 +503,17 @@ export class Room {
     if (!ap || ap.id !== player.id) return;
     const ep = this.handState.players.find(p => p.id === player.id);
     if (!ep || ep.isFolded || ep.isAllIn) return;
+
+    // Player took a voluntary action — restore from sitting_out if needed
+    if (player.presenceState !== 'active') {
+      this.clearSitOutTimer(player);
+      player.presenceState = 'active';
+      this.io.to(this.id).emit('player_returned', {
+        tableId: this.id,
+        playerId: player.id,
+        seatIndex: player.seatIndex,
+      });
+    }
 
     let result;
     try {
@@ -500,8 +561,9 @@ export class Room {
     }
 
     const canAct = this.handState.players.filter(p => !p.isFolded && !p.isAllIn);
-    if (canAct.length === 0) {
-      // All-in runout: show the current street then advance automatically
+    if (canAct.length <= 1) {
+      // All-in runout: no meaningful betting possible (0 or 1 player can act).
+      // Show the current street then advance automatically.
       this.broadcastState();
       setTimeout(() => {
         if (!this.handState) return;
@@ -518,7 +580,7 @@ export class Room {
 
   private startCountdown(): void {
     if (this.countdownTimer || this.handState) return;
-    if (this.seats.size < 2) return;
+    if (this.getActivePlayerCount() < 2) return;
 
     this.countdownSecondsRemaining = Room.COUNTDOWN_SECONDS;
     this.broadcastState(); // immediately show 'countdown' phase
@@ -548,16 +610,19 @@ export class Room {
   // ─── Hand lifecycle ───────────────────────────────────────────────────────
 
   private startHand(): void {
-    const seated = [...this.seats.values()];
-    if (seated.length < 2) return;
+    // Only deal to ACTIVE players (not sitting_out or disconnected)
+    const activePlayers = [...this.seats.values()].filter(
+      p => p.presenceState === 'active',
+    );
+    if (activePlayers.length < 2) return;
 
-    // Rotate dealer button
-    const seatIndices = seated.map(p => p.seatIndex).sort((a, b) => a - b);
+    // Rotate dealer button among active players only
+    const seatIndices = activePlayers.map(p => p.seatIndex).sort((a, b) => a - b);
     const currentDealerPos = seatIndices.indexOf(this.dealerSeatIndex);
     this.dealerSeatIndex = seatIndices[(currentDealerPos + 1) % seatIndices.length];
 
     const seed = uuid();
-    const seatInputs = seated.map(p => ({
+    const seatInputs = activePlayers.map(p => ({
       id: p.id,
       seatIndex: p.seatIndex,
       name: p.name,
@@ -595,10 +660,10 @@ export class Room {
     const result = resolveShowdown(handState);
     result.tableId = this.id;
 
-    // ── Rake calculation ────────────────────────────────────────────────────
+    // ── Rake calculation (skip for practice tables) ────────────────────────
     let rakeAmount = 0;
     const roomConfig = await getRoomConfig(this.id).catch(() => null);
-    const rakePercentage = roomConfig?.rakePercentage ?? 0;
+    const rakePercentage = this.config.isPractice ? 0 : (roomConfig?.rakePercentage ?? 0);
     const rakeCap = Number(roomConfig?.rakeCap ?? 0);
     const totalPot = handState.pot;
 
@@ -636,6 +701,7 @@ export class Room {
 
     // Apply chip changes back to seats
     const playerResults = [];
+    const settledPlayerIds = new Set<string>();
     for (const r of result.allPlayers) {
       const seat = [...this.seats.values()].find(p => p.id === r.playerId);
       if (seat) {
@@ -643,6 +709,7 @@ export class Room {
         if (ep) {
           const startChips = ep.chips + ep.totalContributed;
           seat.chips = ep.chips + r.winAmount;
+          settledPlayerIds.add(r.playerId);
           playerResults.push({
             playerId: r.playerId,
             name: r.name,
@@ -652,6 +719,25 @@ export class Room {
             winAmount: r.winAmount,
           });
         }
+      }
+    }
+
+    // Also update chips for folded players not included in showdown results
+    // (their bets were taken by the engine but resolveShowdown only returns active players)
+    for (const ep of handState.players) {
+      if (settledPlayerIds.has(ep.id)) continue;
+      const seat = [...this.seats.values()].find(p => p.id === ep.id);
+      if (seat) {
+        const startChips = ep.chips + ep.totalContributed;
+        seat.chips = ep.chips; // no winAmount for folded players
+        playerResults.push({
+          playerId: ep.id,
+          name: ep.name,
+          seatIndex: ep.seatIndex,
+          startChips,
+          endChips: seat.chips,
+          winAmount: 0,
+        });
       }
     }
 
@@ -676,13 +762,14 @@ export class Room {
     this.handState = null;
     this.broadcastState();
 
-    // Remove busted players (0 chips) and notify them
+    // Remove busted players (0 chips) from their seat but keep them as spectators
     for (const [seatIndex, player] of this.seats) {
       if (player.chips <= 0) {
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
-          socket.emit('player_kicked', { tableId: this.id, reason: 'Your balance reached 0.' });
-          socket.leave(this.id);
+          // Notify the player they busted out — they stay connected as a spectator
+          socket.emit('player_kicked', { tableId: this.id, reason: 'Your balance reached 0. You are now spectating.' });
+          // Do NOT leave the room — player remains as spectator
         }
         this.socketToSeat.delete(player.socketId);
         this.seats.delete(seatIndex);
@@ -691,15 +778,17 @@ export class Room {
           playerId: player.id,
           seatIndex,
         });
-        this.addSeatCooldown(seatIndex, player);
       }
     }
+
+    // Broadcast updated state so busted players see their seat freed
+    this.broadcastState();
 
     // Persist updated chip counts to Redis
     void this.persistSeats();
 
-    // Start next hand after delay if enough players remain
-    if (this.seats.size >= 2) {
+    // Start next hand after delay if enough ACTIVE players remain
+    if (this.getActivePlayerCount() >= 2) {
       setTimeout(() => this.startHand(), HAND_START_DELAY_MS);
     }
   }
@@ -740,11 +829,20 @@ export class Room {
     const ap = activePlayer(this.handState);
     if (!ap) return;
 
+    // If the active player is disconnected or sitting out, auto-fold after a brief delay
+    const seat = [...this.seats.values()].find(p => p.id === ap.id);
+    if (seat && seat.presenceState !== 'active') {
+      this.broadcastState();
+      this.turnTimer = setTimeout(() => {
+        this.handleAutoFold(ap.id);
+      }, DISCONNECTED_FOLD_DELAY_MS);
+      return;
+    }
+
     const timeoutMs = this.config.turnTimeoutMs;
     this.turnTimeoutAt = Date.now() + timeoutMs;
 
     // Notify the active player
-    const seat = [...this.seats.values()].find(p => p.id === ap.id);
     if (seat) {
       const socket = this.io.sockets.sockets.get(seat.socketId);
       socket?.emit('turn_start', {
@@ -752,7 +850,7 @@ export class Room {
         playerId: ap.id,
         seatIndex: ap.seatIndex,
         timeoutAt: this.turnTimeoutAt,
-        minRaise: calcMinRaise(this.handState),
+        minRaise: Math.max(0, calcMinRaise(this.handState) - ap.currentBet),
         maxRaise: ap.chips,
         callAmount: Math.min(
           this.handState.currentBet - ap.currentBet,
@@ -786,6 +884,14 @@ export class Room {
     if (!ep || ep.isFolded || ep.isAllIn) return;
     const result = autoFold(this.handState, playerId);
     this.handState = result.state;
+
+    // Mark the player as sitting out (timeout-triggered fold)
+    // Only if they were 'active' — if already 'disconnected', their timer is already running
+    const seat = [...this.seats.values()].find(p => p.id === playerId);
+    if (seat && seat.presenceState === 'active') {
+      seat.presenceState = 'sitting_out';
+      this.startSitOutTimer(seat);
+    }
 
     if (result.handComplete) {
       this.finishHand();
@@ -873,6 +979,8 @@ export class Room {
           isFolded: ep?.isFolded ?? false,
           isAllIn: ep?.isAllIn ?? false,
           isConnected: roomPlayer.isConnected,
+          isSittingOut: roomPlayer.presenceState === 'sitting_out' || roomPlayer.presenceState === 'disconnected',
+          sitOutTimeoutAt: roomPlayer.sitOutTimeoutAt,
           currentBet: ep?.currentBet ?? 0,
           holeCards,
         };
@@ -894,7 +1002,9 @@ export class Room {
     const sbSeatIdx = hs ? (hs.players[hs.smallBlindIndex]?.seatIndex ?? 0) : 0;
     const bbSeatIdx = hs ? (hs.players[hs.bigBlindIndex]?.seatIndex ?? 0) : 0;
 
-    const minRaise = hs ? calcMinRaise(hs) : this.config.bigBlind;
+    // minRaise = additional chips the recipient must add (not total bet level)
+    const minRaiseTo = hs ? calcMinRaise(hs) : this.config.bigBlind;
+    const minRaise = Math.max(0, minRaiseTo - (recipientEp?.currentBet ?? 0));
     const maxRaise = recipientEp?.chips ?? 0;
 
     // Build reserved seats info
@@ -921,7 +1031,9 @@ export class Room {
       dealerSeatIndex: dealerSeatIdx,
       smallBlindSeatIndex: sbSeatIdx,
       bigBlindSeatIndex: bbSeatIdx,
-      turnTimeoutAt: ap?.id === recipientId ? this.turnTimeoutAt : null,
+      turnTimeoutAt: this.turnTimeoutAt,
+      turnTimeoutMs: this.config.turnTimeoutMs,
+      serverTime: Date.now(),
       mySeatIndex: recipientSeat?.seatIndex ?? null,
       myHand: recipientEp?.holeCards ?? [null, null],
       isMyTurn: ap?.id === recipientId,
@@ -931,6 +1043,181 @@ export class Room {
       minBuyIn: this.config.minBuyIn,
       maxBuyIn: this.config.maxBuyIn,
     };
+  }
+  // ─── Presence state management ────────────────────────────────────────────
+
+  /** Count of players with presenceState === 'active'. */
+  private getActivePlayerCount(): number {
+    let count = 0;
+    for (const p of this.seats.values()) {
+      if (p.presenceState === 'active') count++;
+    }
+    return count;
+  }
+
+  /**
+   * Mark a player as disconnected (without removing them from the table).
+   * Called by RoomManager.handleDisconnect() instead of leave().
+   */
+  markDisconnected(socketId: string): void {
+    const seatIndex = this.socketToSeat.get(socketId);
+    if (seatIndex === undefined) return;
+
+    const player = this.seats.get(seatIndex);
+    if (!player) return;
+
+    player.isConnected = false;
+    player.presenceState = 'disconnected';
+
+    // Update EnginePlayer if hand is running
+    if (this.handState) {
+      const ep = this.handState.players.find(p => p.id === player.id);
+      if (ep) ep.isConnected = false;
+    }
+
+    // Start 60s removal timer. The turn timer (if it's their turn) will
+    // expire naturally and handleAutoFold will fire. If it's NOT their turn,
+    // startTurnTimer will detect the disconnect when their turn comes and
+    // auto-fold after a brief delay.
+    this.startSitOutTimer(player);
+
+    this.broadcastState();
+  }
+
+  private startSitOutTimer(player: RoomPlayer): void {
+    this.clearSitOutTimer(player);
+
+    player.sitOutTimeoutAt = Date.now() + SIT_OUT_TIMEOUT_MS;
+    player.sitOutTimer = setTimeout(() => {
+      this.removeSitOutPlayer(player.id);
+    }, SIT_OUT_TIMEOUT_MS);
+
+    this.io.to(this.id).emit('player_sitting_out', {
+      tableId: this.id,
+      playerId: player.id,
+      seatIndex: player.seatIndex,
+      timeoutAt: player.sitOutTimeoutAt,
+    });
+  }
+
+  private clearSitOutTimer(player: RoomPlayer): void {
+    if (player.sitOutTimer) {
+      clearTimeout(player.sitOutTimer);
+      player.sitOutTimer = null;
+    }
+    player.sitOutTimeoutAt = null;
+  }
+
+  /**
+   * Remove a player whose sit-out timer has expired.
+   * Folds them if in a hand, settles their balance, frees their seat.
+   */
+  private removeSitOutPlayer(playerId: string): void {
+    const player = [...this.seats.values()].find(p => p.id === playerId);
+    if (!player) return;
+
+    const seatIndex = player.seatIndex;
+
+    // If player is in an active hand, fold them
+    if (this.handState) {
+      const ep = this.handState.players.find(p => p.id === playerId);
+      if (ep && !ep.isFolded && !ep.isAllIn) {
+        const ap = activePlayer(this.handState);
+        if (ap?.id === playerId) {
+          this.clearTurnTimer();
+          const result = autoFold(this.handState, playerId);
+          this.handState = result.state;
+        } else {
+          ep.isFolded = true;
+        }
+      }
+    }
+
+    // Remove from seat maps
+    this.clearSitOutTimer(player);
+    this.seats.delete(seatIndex);
+    this.socketToSeat.delete(player.socketId);
+    void this.persistSeats();
+
+    this.io.to(this.id).emit('player_left', {
+      tableId: this.id,
+      playerId: player.id,
+      seatIndex,
+    });
+
+    // Notify the player their chips are being returned
+    const socket = this.io.sockets.sockets.get(player.socketId);
+    socket?.emit('player_kicked', {
+      tableId: this.id,
+      reason: 'Removed from table due to inactivity. Your chips have been returned.',
+    });
+
+    // Settle balance (return chips to wallet or internal balance)
+    void settlePlayerBalance(
+      { userId: player.userId, walletAddress: player.walletAddress, isVaultPlayer: player.isVaultPlayer, chips: player.chips },
+      this.id,
+      this.config.isPractice ?? false,
+    ).then(({ txSignature }) => {
+      if (txSignature !== undefined) {
+        socket?.emit('cash_out_complete', { tableId: this.id, amount: player.chips, txSignature });
+      }
+    });
+
+    // Check if hand needs resolution after this removal
+    if (this.handState) {
+      const remaining = this.handState.players.filter(p => !p.isFolded);
+      if (remaining.length <= 1) {
+        this.clearTurnTimer();
+        this.finishHand();
+        return;
+      }
+      // If the removed player was the active player, advance to next
+      const ap = activePlayer(this.handState);
+      if (!ap || ap.isFolded) {
+        // Engine state is inconsistent — finish the hand safely
+        this.clearTurnTimer();
+        this.finishHand();
+        return;
+      }
+    }
+
+    // Cancel countdown if not enough active players
+    if (this.getActivePlayerCount() < 2 && this.countdownTimer) {
+      this.clearCountdown();
+    }
+
+    this.broadcastState();
+  }
+
+  /**
+   * Player returns from sitting out (clicked "I'm Back" in the UI).
+   */
+  returnToTable(socketId: string): boolean {
+    const seatIndex = this.socketToSeat.get(socketId);
+    if (seatIndex === undefined) return false;
+
+    const player = this.seats.get(seatIndex);
+    if (!player) return false;
+    if (player.presenceState === 'active') return true;
+
+    this.clearSitOutTimer(player);
+    player.presenceState = 'active';
+    player.isConnected = true;
+
+    this.io.to(this.id).emit('player_returned', {
+      tableId: this.id,
+      playerId: player.id,
+      seatIndex: player.seatIndex,
+    });
+
+    this.broadcastState();
+
+    // If we now have 2+ active players and no hand running, start countdown
+    if (this.getActivePlayerCount() >= 2 && !this.handState && !this.countdownTimer) {
+      this.startCountdown();
+    }
+
+    return true;
   }
 }
 

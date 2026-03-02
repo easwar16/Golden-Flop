@@ -7,7 +7,16 @@ export const APP_IDENTITY = {
   icon: './assets/images/icon.png',
 } as const;
 
+/**
+ * Cluster for MobileWalletProvider.
+ * Must match the server's SOLANA_NETWORK env var.
+ * Change to 'solana:mainnet-beta' for production.
+ */
 export const CLUSTER = 'solana:devnet' as const;
 
-/** Solana network for RPC connections — must match CLUSTER above */
-export const SOLANA_NETWORK: 'devnet' | 'mainnet-beta' = 'devnet';
+/**
+ * Network name for @solana/web3.js clusterApiUrl().
+ * Derived from CLUSTER so they stay in sync.
+ */
+export const SOLANA_NETWORK: 'devnet' | 'mainnet-beta' =
+  CLUSTER === 'solana:mainnet-beta' ? 'mainnet-beta' : 'devnet';
