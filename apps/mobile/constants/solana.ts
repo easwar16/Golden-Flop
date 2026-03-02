@@ -13,3 +13,10 @@ export const APP_IDENTITY = {
  * Change to 'solana:mainnet-beta' for production.
  */
 export const CLUSTER = 'solana:devnet' as const;
+
+/**
+ * Network name for @solana/web3.js clusterApiUrl().
+ * Derived from CLUSTER so they stay in sync.
+ */
+export const SOLANA_NETWORK: 'devnet' | 'mainnet-beta' =
+  CLUSTER === 'solana:mainnet-beta' ? 'mainnet-beta' : 'devnet';

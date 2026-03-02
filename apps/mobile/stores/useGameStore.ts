@@ -72,6 +72,8 @@ export interface TableStatePayload {
   smallBlindSeatIndex: number;
   bigBlindSeatIndex: number;
   turnTimeoutAt: number | null;
+  turnTimeoutMs?: number;
+  serverTime: number;
   mySeatIndex: number | null;
   myHand: (CardValue | null)[];
   isMyTurn: boolean;
@@ -122,6 +124,7 @@ interface NetworkSlice {
   smallBlindSeatIndex: number;
   bigBlindSeatIndex: number;
   turnTimeoutAt: number | null;
+  turnTimeoutMs: number;
   mySeatIndex: number | null;
   myHand: (CardValue | null)[];
   isMyTurn: boolean;
@@ -185,6 +188,7 @@ const defaultNetworkSlice: NetworkSlice = {
   smallBlindSeatIndex: 0,
   bigBlindSeatIndex: 0,
   turnTimeoutAt: null,
+  turnTimeoutMs: 30_000,
   mySeatIndex: null,
   myHand: [null, null],
   isMyTurn: false,
@@ -226,7 +230,13 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         dealerSeatIndex: payload.dealerSeatIndex,
         smallBlindSeatIndex: payload.smallBlindSeatIndex,
         bigBlindSeatIndex: payload.bigBlindSeatIndex,
-        turnTimeoutAt: payload.turnTimeoutAt,
+        // Adjust for client/server clock skew so the timer starts ticking immediately
+        turnTimeoutAt: payload.turnTimeoutAt != null
+          ? (payload.serverTime
+              ? payload.turnTimeoutAt - payload.serverTime + Date.now()
+              : payload.turnTimeoutAt)
+          : null,
+        turnTimeoutMs: payload.turnTimeoutMs,
         mySeatIndex: payload.mySeatIndex,
         myHand: payload.myHand,
         isMyTurn: payload.isMyTurn,
@@ -238,7 +248,7 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         reservedSeats: payload.reservedSeats ?? [],
         isJoining: false,
         // Reset raise amount to min on each new state if it's our turn
-        raiseAmount: payload.isMyTurn ? payload.minRaise : get().raiseAmount,
+        raiseAmount: payload.isMyTurn ? Math.min(payload.minRaise, payload.maxRaise) : get().raiseAmount,
       });
     },
 

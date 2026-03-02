@@ -41,16 +41,21 @@ import { savePlayers } from '../redis/TableStore';
 import { recordHandResult } from '../services/game.service';
 import { getRoom as getRoomConfig } from '../services/room.service';
 import { processRakeTransfer } from '../solana/PayoutService';
+import { settlePlayerBalance } from '../balance/settlePlayerBalance';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 const HAND_START_DELAY_MS = 5_000;   // pause after hand result before next deal
 const SHOWDOWN_REVEAL_MS = 5_000;    // time to show cards before distributing
 const RESERVATION_TIMEOUT_MS = 30_000; // auto-expire seat reservations after 30 seconds
+const SIT_OUT_TIMEOUT_MS = 60_000;   // 60 seconds before inactive player is removed
+const DISCONNECTED_FOLD_DELAY_MS = 2_000; // brief delay before auto-folding disconnected player
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seated player record (separate from EnginePlayer – Room concerns)
 // ─────────────────────────────────────────────────────────────────────────────
+
+export type PlayerPresenceState = 'active' | 'sitting_out' | 'disconnected';
 
 export interface RoomPlayer {
   id: string;
@@ -60,6 +65,12 @@ export interface RoomPlayer {
   chips: number;
   seatIndex: number;
   isConnected: boolean;
+  /** Current presence state — determines hand eligibility and removal timing. */
+  presenceState: PlayerPresenceState;
+  /** Handle for the 60-second sit-out removal timer (null when active). */
+  sitOutTimer: ReturnType<typeof setTimeout> | null;
+  /** UTC ms when this player will be removed if they don't return (null when active). */
+  sitOutTimeoutAt: number | null;
   /** Database user ID — null for guests. */
   userId?: string | null;
   /** Base58 wallet address — set when player joins via vault deposit. */
@@ -328,6 +339,9 @@ export class Room {
       chips: buyIn,
       seatIndex,
       isConnected: true,
+      presenceState: 'active',
+      sitOutTimer: null,
+      sitOutTimeoutAt: null,
       userId: opts?.userId ?? null,
       walletAddress: opts?.walletAddress ?? null,
       isVaultPlayer: opts?.isVaultPlayer ?? false,
@@ -502,8 +516,9 @@ export class Room {
     }
 
     const canAct = this.handState.players.filter(p => !p.isFolded && !p.isAllIn);
-    if (canAct.length === 0) {
-      // All-in runout: show the current street then advance automatically
+    if (canAct.length <= 1) {
+      // All-in runout: no meaningful betting possible (0 or 1 player can act).
+      // Show the current street then advance automatically.
       this.broadcastState();
       setTimeout(() => {
         if (!this.handState) return;
@@ -678,13 +693,14 @@ export class Room {
     this.handState = null;
     this.broadcastState();
 
-    // Remove busted players (0 chips) and notify them
+    // Remove busted players (0 chips) from their seat but keep them as spectators
     for (const [seatIndex, player] of this.seats) {
       if (player.chips <= 0) {
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
-          socket.emit('player_kicked', { tableId: this.id, reason: 'Your balance reached 0.' });
-          socket.leave(this.id);
+          // Notify the player they busted out — they stay connected as a spectator
+          socket.emit('player_kicked', { tableId: this.id, reason: 'Your balance reached 0. You are now spectating.' });
+          // Do NOT leave the room — player remains as spectator
         }
         this.socketToSeat.delete(player.socketId);
         this.seats.delete(seatIndex);
@@ -693,9 +709,11 @@ export class Room {
           playerId: player.id,
           seatIndex,
         });
-        this.addSeatCooldown(seatIndex, player);
       }
     }
+
+    // Broadcast updated state so busted players see their seat freed
+    this.broadcastState();
 
     // Persist updated chip counts to Redis
     void this.persistSeats();
@@ -754,7 +772,7 @@ export class Room {
         playerId: ap.id,
         seatIndex: ap.seatIndex,
         timeoutAt: this.turnTimeoutAt,
-        minRaise: calcMinRaise(this.handState),
+        minRaise: Math.max(0, calcMinRaise(this.handState) - ap.currentBet),
         maxRaise: ap.chips,
         callAmount: Math.min(
           this.handState.currentBet - ap.currentBet,
@@ -896,7 +914,9 @@ export class Room {
     const sbSeatIdx = hs ? (hs.players[hs.smallBlindIndex]?.seatIndex ?? 0) : 0;
     const bbSeatIdx = hs ? (hs.players[hs.bigBlindIndex]?.seatIndex ?? 0) : 0;
 
-    const minRaise = hs ? calcMinRaise(hs) : this.config.bigBlind;
+    // minRaise = additional chips the recipient must add (not total bet level)
+    const minRaiseTo = hs ? calcMinRaise(hs) : this.config.bigBlind;
+    const minRaise = Math.max(0, minRaiseTo - (recipientEp?.currentBet ?? 0));
     const maxRaise = recipientEp?.chips ?? 0;
 
     // Build reserved seats info
@@ -923,7 +943,9 @@ export class Room {
       dealerSeatIndex: dealerSeatIdx,
       smallBlindSeatIndex: sbSeatIdx,
       bigBlindSeatIndex: bbSeatIdx,
-      turnTimeoutAt: ap?.id === recipientId ? this.turnTimeoutAt : null,
+      turnTimeoutAt: this.turnTimeoutAt,
+      turnTimeoutMs: this.config.turnTimeoutMs,
+      serverTime: Date.now(),
       mySeatIndex: recipientSeat?.seatIndex ?? null,
       myHand: recipientEp?.holeCards ?? [null, null],
       isMyTurn: ap?.id === recipientId,

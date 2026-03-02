@@ -70,10 +70,12 @@ export const GameActionButtons = memo(function GameActionButtons({
 
       {/* ALL-IN */}
       <Pressable
-        style={({ pressed }) => [styles.allInBtn, pressed && styles.actionBtnP, zeroBalance && styles.actionBtnDisabled]}
+        style={({ pressed }) => [styles.allInWrap, pressed && styles.actionBtnP, zeroBalance && styles.actionBtnDisabled]}
         onPress={() => onAction('all-in')}
         disabled={zeroBalance}>
-        <Text style={styles.allInBtnText}>ALL-IN</Text>
+        <ImageBackground
+          source={require('@/assets/images/buttons/allin-btn.png')}
+          style={styles.btnBg} resizeMode="stretch" />
       </Pressable>
     </View>
   );
@@ -107,16 +109,7 @@ const styles = StyleSheet.create({
     fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff',
     textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
-  allInBtn: {
-    paddingHorizontal: 10, minHeight: 48,
-    borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#6a1b9a',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 1, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
-      android: { elevation: 4 }, default: {},
-    }),
-  },
+  allInWrap: { flex: 1, minHeight: 48, overflow: 'hidden' },
   allInBtnText: {
     fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: '#fff',
   },

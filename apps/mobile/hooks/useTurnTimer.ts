@@ -12,15 +12,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const TURN_DURATION_MS = 30_000; // must match server config
-
 interface TurnTimerResult {
   secondsLeft: number;
   progress: number;   // 1 = full, 0 = expired
   isExpired: boolean;
 }
 
-export function useTurnTimer(turnTimeoutAt: number | null): TurnTimerResult {
+export function useTurnTimer(turnTimeoutAt: number | null, turnDurationMs: number = 30_000): TurnTimerResult {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -33,7 +31,9 @@ export function useTurnTimer(turnTimeoutAt: number | null): TurnTimerResult {
 
     const tick = () => {
       const remaining = Math.max(0, turnTimeoutAt - Date.now());
-      setSecondsLeft(Math.ceil(remaining / 1_000));
+      // Cap to turnDurationMs to guard against client/server clock skew
+      const capped = Math.min(remaining, turnDurationMs);
+      setSecondsLeft(Math.ceil(capped / 1_000));
     };
 
     tick(); // immediate first tick
@@ -42,10 +42,10 @@ export function useTurnTimer(turnTimeoutAt: number | null): TurnTimerResult {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [turnTimeoutAt]);
+  }, [turnTimeoutAt, turnDurationMs]);
 
   const progress = turnTimeoutAt
-    ? Math.max(0, Math.min(1, (turnTimeoutAt - Date.now()) / TURN_DURATION_MS))
+    ? Math.max(0, Math.min(1, (turnTimeoutAt - Date.now()) / turnDurationMs))
     : 0;
 
   return {

@@ -250,7 +250,7 @@ class SocketServiceClass {
 
     s.on('player_kicked', (payload: { tableId: string; reason: string }) => {
       console.log('[socket] kicked from table:', payload.reason);
-      useGameStore.getState().reset();
+      // Don't reset — player stays as spectator and continues receiving table_state
       useGameStore.getState().setKicked(payload.reason);
     });
 

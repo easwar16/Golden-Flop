@@ -20,6 +20,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -71,6 +72,17 @@ function formatSol(lamports: number): string {
   if (sol >= 0.01) return `${sol.toFixed(2)} ◎`;
   if (sol > 0) return `${sol.toFixed(4)} ◎`;
   return '0 ◎';
+}
+
+function formatChips(chips: number): string {
+  if (chips >= 1_000_000) return `${(chips / 1_000_000).toFixed(1)}M`;
+  if (chips >= 1_000) return `${Math.round(chips).toLocaleString()}`;
+  return `${Math.round(chips)}`;
+}
+
+/** Returns the right formatter based on whether the table uses practice chips or SOL. */
+function getFormatter(isPractice: boolean): (value: number) => string {
+  return isPractice ? formatChips : formatSol;
 }
 
 // Seat positions are computed dynamically in the component from screen dimensions.
@@ -138,6 +150,7 @@ interface SeatSlotProps {
   isTaken: boolean; // seat is occupied but we don't have full data yet
   reservation?: { seatIndex: number; playerId: string; playerName: string; avatarSeed: string };
   onJoin: (seatIndex: number) => void;
+  formatValue: (v: number) => string;
 }
 
 const SeatSlot = memo(function SeatSlot({
@@ -149,6 +162,7 @@ const SeatSlot = memo(function SeatSlot({
   isTaken,
   reservation,
   onJoin,
+  formatValue,
 }: SeatSlotProps) {
   // Read only this seat from the store to prevent re-renders when other seats change
   const seat = useGameStore((s) => s.seats[seatIndex]);
@@ -221,9 +235,12 @@ const SeatSlot = memo(function SeatSlot({
       {seat ? (
         <View style={slotStyles.info}>
           <Text style={slotStyles.name} numberOfLines={1}>{displayName}</Text>
-          <Text style={slotStyles.chips}>{formatSol(seat.chips)}</Text>
+          <Text style={slotStyles.chips}>{formatValue(seat.chips)}</Text>
           {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
           {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
+          {seat.currentBet > 0 && !seat.isFolded && (
+            <Text style={slotStyles.betLabel}>{seat.isAllIn ? 'ALL IN' : formatValue(seat.currentBet)}</Text>
+          )}
         </View>
       ) : reservation ? (
         <View style={slotStyles.info}>
@@ -300,6 +317,10 @@ const slotStyles = StyleSheet.create({
   },
   allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FF6B6B' },
   foldedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.4)' },
+  betLabel: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: gold,
+    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -713,9 +734,10 @@ interface ChipSweepProps {
   winAmount: number;
   handName: string;
   onComplete: () => void;
+  formatValue: (v: number) => string;
 }
 
-const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete }: ChipSweepProps) {
+const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete, formatValue }: ChipSweepProps) {
   const chips = useRef(
     Array.from({ length: CHIP_COUNT }, () => ({
       x: new Animated.Value(origin.x),
@@ -848,7 +870,7 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
           zIndex: 60,
         }}
       >
-        +{formatSol(winAmount)}
+        +{formatValue(winAmount)}
       </Animated.Text>
     </>
   );
@@ -887,52 +909,67 @@ const pbStyles = StyleSheet.create({
 // Raise amount input
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface RaiseInputProps { min: number; max: number; value: number; onChange: (v: number) => void; }
+interface RaiseInputProps { min: number; max: number; value: number; onChange: (v: number) => void; isPractice?: boolean; }
 
-/** All props (min, max, value, onChange) are in lamports. Display is in SOL. */
-const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onChange }: RaiseInputProps) {
-  const toSol = (lamports: number) => lamports / LAMPORTS_PER_SOL;
-  const toLamports = (sol: number) => Math.round(sol * LAMPORTS_PER_SOL);
-  const fmtSol = (lamports: number) => {
-    const sol = toSol(lamports);
-    if (sol >= 1) return sol.toFixed(2);
-    if (sol >= 0.01) return sol.toFixed(2);
-    if (sol > 0) return sol.toFixed(4);
+/** For SOL tables: values are in lamports, display in SOL. For practice: values are raw chips. */
+const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onChange, isPractice = false }: RaiseInputProps) {
+  const toDisplay = isPractice ? (v: number) => v : (lamports: number) => lamports / LAMPORTS_PER_SOL;
+  const toInternal = isPractice ? (v: number) => Math.round(v) : (sol: number) => Math.round(sol * LAMPORTS_PER_SOL);
+  const fmtDisplay = (internal: number) => {
+    const display = toDisplay(internal);
+    if (isPractice) return Math.round(display).toLocaleString();
+    if (display >= 1) return display.toFixed(2);
+    if (display >= 0.01) return display.toFixed(2);
+    if (display > 0) return display.toFixed(4);
     return '0';
   };
 
-  const [text, setText] = useState(fmtSol(value));
+  const [text, setText] = useState(fmtDisplay(value));
 
-  useEffect(() => { setText(fmtSol(value)); }, [value]);
+  useEffect(() => { setText(fmtDisplay(value)); }, [value]);
+
+  const handleTextChange = useCallback((t: string) => {
+    const cleaned = t.replace(/[^0-9.]/g, '');
+    setText(cleaned);
+    // Immediately sync valid values to the store so the RAISE button always uses the latest input
+    const n = parseFloat(cleaned);
+    if (!isNaN(n) && n > 0) {
+      const internal = toInternal(n);
+      const clamped = Math.max(min, Math.min(max, internal));
+      onChange(clamped);
+    }
+  }, [min, max, onChange]);
 
   const commit = useCallback(() => {
     const n = parseFloat(text);
     if (!isNaN(n) && n > 0) {
-      const lamports = toLamports(n);
-      const clamped = Math.max(min, Math.min(max, lamports));
+      const internal = toInternal(n);
+      const clamped = Math.max(min, Math.min(max, internal));
       onChange(clamped);
-      setText(fmtSol(clamped));
+      setText(fmtDisplay(clamped));
     } else {
-      setText(fmtSol(value));
+      setText(fmtDisplay(value));
     }
   }, [text, value, min, max, onChange]);
 
-  const currentLamports = (() => {
+  const currentInternal = (() => {
     const n = parseFloat(text);
-    return !isNaN(n) && n > 0 ? toLamports(n) : value;
+    return !isNaN(n) && n > 0 ? toInternal(n) : value;
   })();
 
+  const minStep = isPractice ? 1 : toInternal(0.0001);
+
   const dec = useCallback(() => {
-    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
-    const next = Math.max(min, currentLamports - step);
-    onChange(next); setText(fmtSol(next));
-  }, [currentLamports, min, onChange]);
+    const step = Math.max(minStep, Math.round(currentInternal * 0.10));
+    const next = Math.max(min, currentInternal - step);
+    onChange(next); setText(fmtDisplay(next));
+  }, [currentInternal, min, minStep, onChange]);
 
   const inc = useCallback(() => {
-    const step = Math.max(toLamports(0.0001), Math.round(currentLamports * 0.10));
-    const next = Math.min(max, currentLamports + step);
-    onChange(next); setText(fmtSol(next));
-  }, [currentLamports, max, onChange]);
+    const step = Math.max(minStep, Math.round(currentInternal * 0.10));
+    const next = Math.min(max, currentInternal + step);
+    onChange(next); setText(fmtDisplay(next));
+  }, [currentInternal, max, minStep, onChange]);
 
   return (
     <View style={riStyles.wrap}>
@@ -945,7 +982,7 @@ const RaiseAmountInput = memo(function RaiseAmountInput({ min, max, value, onCha
         <TextInput
           style={riStyles.input}
           value={text}
-          onChangeText={(t) => setText(t.replace(/[^0-9.]/g, ''))}
+          onChangeText={handleTextChange}
           onBlur={commit} onSubmitEditing={commit}
           keyboardType="decimal-pad" selectTextOnFocus showSoftInputOnFocus
         />
@@ -1034,6 +1071,8 @@ export default function TableScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const isPractice = id.startsWith('practice-');
+  const fmtValue = useMemo(() => getFormatter(isPractice), [isPractice]);
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
   // Top bar: safe-area + 6 margin + ~52px bar = insets.top + 58
@@ -1047,7 +1086,7 @@ export default function TableScreen() {
   // Seat positions: absolute coords inside the main container
   // 0=top-center, 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right, 5=bottom-center
   const SEAT_POSITIONS = [
-    { top: TABLE_TOP + Math.round(TABLE_H * 0.03), left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
+    { top: TABLE_TOP , left: screenW / 2 - 32 }, // 0 top-center (straddles top edge)
     { top: TABLE_TOP + Math.round(TABLE_H * 0.20), left: 4 }, // 1 top-left
     { top: TABLE_TOP + Math.round(TABLE_H * 0.20), right: 4 }, // 2 top-right
     { top: TABLE_TOP + Math.round(TABLE_H * 0.53), left: 4 }, // 3 bottom-left
@@ -1079,7 +1118,8 @@ export default function TableScreen() {
   const lobbyTables = useLobbyStore((s) => s.tables);
 
   const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
-  const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt));
+  const turnTimeoutMs = useGameStore((s) => s.turnTimeoutMs);
+  const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt), turnTimeoutMs);
 
   const { hideTransition } = useTransition();
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
@@ -1091,13 +1131,8 @@ export default function TableScreen() {
   const [cashOutAlert, setCashOutAlert] = useState<{ title: string; message: string } | null>(null);
   const leftAlreadyRef = useRef(false);
 
-  // ── Auto-navigate away when kicked (busted out) ─────────────────────────
+  // ── Busted out — player stays as spectator ──────────────────────────────
   const kickedReason = useGameStore((s) => s.kickedReason);
-  useEffect(() => {
-    if (!kickedReason) return;
-    useGameStore.getState().clearKicked();
-    router.replace('/');
-  }, [kickedReason, router]);
 
 
   const onLayoutRoot = useCallback(async () => {
@@ -1119,6 +1154,7 @@ export default function TableScreen() {
   useEffect(() => {
     return () => {
       if (id && !leftAlreadyRef.current) SocketService.leaveTable(id);
+      useGameStore.getState().clearKicked();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1184,6 +1220,8 @@ export default function TableScreen() {
   }, []);
 
   const handleSeatPress = useCallback((seatIndex: number) => {
+    // Clear busted state so the player can re-join
+    useGameStore.getState().clearKicked();
     setBuyInModal({ visible: true, seatIndex });
   }, []);
 
@@ -1218,8 +1256,10 @@ export default function TableScreen() {
   }
 
   // ── Lobby data — used to show occupied seats before we have full table_state ─
+  // Once we have real seat data from table_state, stop using stale lobby data.
+  const hasTableState = seats.some(Boolean);
   const lobbyTable = lobbyTables.find((t) => t.id === id);
-  const lobbyOccupiedSeats: number[] = lobbyTable?.occupiedSeats ?? [];
+  const lobbyOccupiedSeats: number[] = hasTableState ? [] : (lobbyTable?.occupiedSeats ?? []);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const roomId = (id?.length ?? 0) > 8 ? `${id!.slice(0, 6)}…${id!.slice(-2)}` : (id ?? '—');
@@ -1283,6 +1323,7 @@ export default function TableScreen() {
           winAmount={w.winAmount}
           handName={w.bestHandName}
           onComplete={dismissHandResult}
+          formatValue={fmtValue}
         />
       ))}
 
@@ -1294,7 +1335,7 @@ export default function TableScreen() {
 
       {/* Table image — positioned between top bar and bottom controls */}
       <View style={[styles.tableArea, { marginTop:-90,top: TABLE_TOP, height: TABLE_H }]}>
-        <Image source={require('@/assets/images/table.png')} style={styles.tableImage} resizeMode="stretch" />
+        <Image source={require('@/assets/images/table.png')} style={styles.tableImage} resizeMode="contain" />
 
         {/* Community cards + phase badge + pot */}
         <View style={styles.communityOverlay}>
@@ -1314,7 +1355,7 @@ export default function TableScreen() {
               );
             })}
           </View>
-          {pot > 0 && phase !== 'preflop' && <Text style={styles.potLabel}>POT: {formatSol(pot)}</Text>}
+          {pot > 0 && <Text style={styles.potLabel}>POT: {fmtValue(pot)}</Text>}
 
           {/* Player's hole cards — shown below pot, only when in a hand */}
           {isInHand && mySeatIndex !== null && (
@@ -1352,6 +1393,7 @@ export default function TableScreen() {
               isTaken={!seats[v] && (lobbyOccupiedSeats.includes(v) || isReserved)}
               reservation={reservation}
               onJoin={handleSeatPress}
+              formatValue={fmtValue}
             />
           </View>
         );
@@ -1359,7 +1401,7 @@ export default function TableScreen() {
 
       {/* Top bar */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        {isMyTurn && (
+        {secondsLeft > 0 && (
           <View style={[styles.turnTimerWrap, secondsLeft <= 5 && styles.turnTimerWrapUrgent]}>
             <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
               {secondsLeft}s
@@ -1422,10 +1464,19 @@ export default function TableScreen() {
       />
 
       {/* Action bar — only when seated */}
-      {mySeatIndex !== null && (
+      {/* Busted-out spectator banner */}
+      {kickedReason && (
         <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={styles.bustedBanner}>
+            <Text style={styles.bustedText}>INSUFFICIENT BALANCE</Text>
+            <Text style={styles.bustedSub}>You are now spectating this table.</Text>
+          </View>
+        </View>
+      )}
 
-          {/* Action buttons — only rendered when it's my turn */}
+      {/* Action buttons — only when seated and not busted */}
+      {mySeatIndex !== null && !kickedReason && (
+        <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
           {isMyTurn && (
             <>
               <View style={styles.raiseRow}>
@@ -1434,6 +1485,7 @@ export default function TableScreen() {
                   max={maxRaise}
                   value={Math.max(minRaise, Math.min(maxRaise, raiseAmount))}
                   onChange={setRaiseAmount}
+                  isPractice={isPractice}
                 />
               </View>
 
@@ -1460,7 +1512,7 @@ const styles = StyleSheet.create({
   loadingText: { color: gold, fontSize: 14 },
 
   tableArea: { position: 'absolute', left: 0, right: 0, zIndex: 2 },
-  tableImage: { width: '110%', height: '100%', marginLeft: '-5%' },
+  tableImage: { width: '95%', height: '100%', alignSelf: 'center' },
 
   communityOverlay: {
     position: 'absolute', top: '42%',
@@ -1551,6 +1603,20 @@ const styles = StyleSheet.create({
   },
   holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
   holeCard: { width: 52, height: 74 },
+  bustedBanner: {
+    backgroundColor: 'rgba(26,10,46,0.92)',
+    borderWidth: 2, borderColor: '#FF4444', borderRadius: 14,
+    paddingHorizontal: 20, paddingVertical: 16,
+    alignItems: 'center', gap: 6,
+  },
+  bustedText: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#FF4444',
+    textShadowColor: 'rgba(255,0,0,0.4)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8,
+  },
+  bustedSub: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 1,
+  },
   raiseRow: { flexDirection: 'row', marginBottom: 12, paddingHorizontal: 4 },
 });
 

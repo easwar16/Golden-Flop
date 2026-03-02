@@ -110,7 +110,7 @@ export default function SettingsScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={styles.container} onLayout={onLayoutRoot}>
         <ImageBackground
-          source={require('@/assets/images/lobby-bg.png')}
+          source={require('@/assets/images/settings-bg.png')}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />

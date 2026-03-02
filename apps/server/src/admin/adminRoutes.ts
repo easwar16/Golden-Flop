@@ -1,11 +1,11 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { DEFAULT_TABLES } from '../table/definitions';
 import {
   isVaultConfigured,
   getVaultBalance,
   transferSOLFromVault,
 } from '../solana/VaultService';
 import { LAMPORTS_PER_SOL } from '../table/constants';
+import { listRooms } from '../services/room.service';
 
 const SWEEP_DESTINATION = '26UGHSCAbjHo4vb3YbmxVoqCiECrYo3nzQvZktLF2yHg';
 
@@ -39,6 +39,8 @@ adminRouter.get('/vault/balances', async (_req: Request, res: Response) => {
     return;
   }
 
+  const rooms = await listRooms();
+
   const results: Array<{
     roomId: string;
     name: string;
@@ -46,19 +48,20 @@ adminRouter.get('/vault/balances', async (_req: Request, res: Response) => {
     sol: number;
   }> = [];
 
-  for (const table of DEFAULT_TABLES) {
+  for (const room of rooms) {
+    if (room.isPractice) continue;
     try {
-      const balance = await getVaultBalance(table.id);
+      const balance = await getVaultBalance(room.id);
       results.push({
-        roomId: table.id,
-        name: table.name,
+        roomId: room.id,
+        name: room.name,
         lamports: balance.toString(),
         sol: Number(balance) / LAMPORTS_PER_SOL,
       });
     } catch (err) {
       results.push({
-        roomId: table.id,
-        name: table.name,
+        roomId: room.id,
+        name: room.name,
         lamports: '0',
         sol: 0,
       });
@@ -82,6 +85,8 @@ adminRouter.post('/vault/sweep', async (_req: Request, res: Response) => {
     return;
   }
 
+  const rooms = await listRooms();
+
   const sweepResults: Array<{
     roomId: string;
     name: string;
@@ -91,15 +96,16 @@ adminRouter.post('/vault/sweep', async (_req: Request, res: Response) => {
     skipped?: boolean;
   }> = [];
 
-  for (const table of DEFAULT_TABLES) {
+  for (const room of rooms) {
+    if (room.isPractice) continue;
     try {
-      const balance = await getVaultBalance(table.id);
+      const balance = await getVaultBalance(room.id);
       const sweepable = balance - BigInt(TX_FEE_BUFFER);
 
       if (sweepable <= 0n) {
         sweepResults.push({
-          roomId: table.id,
-          name: table.name,
+          roomId: room.id,
+          name: room.name,
           lamports: balance.toString(),
           skipped: true,
         });
@@ -107,21 +113,21 @@ adminRouter.post('/vault/sweep', async (_req: Request, res: Response) => {
       }
 
       const signature = await transferSOLFromVault(
-        table.id,
+        room.id,
         SWEEP_DESTINATION,
         sweepable,
       );
 
       sweepResults.push({
-        roomId: table.id,
-        name: table.name,
+        roomId: room.id,
+        name: room.name,
         lamports: sweepable.toString(),
         signature,
       });
     } catch (err) {
       sweepResults.push({
-        roomId: table.id,
-        name: table.name,
+        roomId: room.id,
+        name: room.name,
         lamports: '0',
         error: err instanceof Error ? err.message : String(err),
       });

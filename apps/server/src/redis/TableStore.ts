@@ -10,7 +10,7 @@
  *   Socket IDs (they're meaningless after a restart)
  *
  * On server restart:
- *   1. TableRegistry creates the table rooms from definitions.ts
+ *   1. TableRegistry creates the table rooms from the database
  *   2. TableStore.restoreTable() is called for each table
  *   3. Any previously seated players are re-added to the seat map with their
  *      last known chip counts; their socketId is set to '' (disconnected)
