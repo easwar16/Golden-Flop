@@ -67,11 +67,10 @@ const gold = '#FFD700';
 
 function formatSol(lamports: number): string {
   const sol = lamports / 1_000_000_000;
-  if (sol >= 1_000) return `${(sol / 1_000).toFixed(1)}K ◎`;
-  if (sol >= 1) return `${sol.toFixed(2)} ◎`;
-  if (sol >= 0.01) return `${sol.toFixed(2)} ◎`;
-  if (sol > 0) return `${sol.toFixed(4)} ◎`;
-  return '0 ◎';
+  if (sol === 0) return '0 ◎';
+  // Show up to 9 decimals (lamport precision), strip trailing zeros
+  const str = sol.toFixed(9).replace(/\.?0+$/, '');
+  return `${str} ◎`;
 }
 
 function formatChips(chips: number): string {
@@ -188,9 +187,11 @@ const SeatSlot = memo(function SeatSlot({
       {/* Pulsing glow behind active player's avatar */}
       {isActive && <ActiveGlow progress={timerProgress} size={64} />}
 
-      {/* Avatar */}
+      {/* Avatar (dimmed if sitting out or disconnected) */}
       {seat ? (
-        <PixelAvatar seed={seed} size={56} borderRadius={25} />
+        <View style={seat.isSittingOut ? { opacity: 0.4 } : undefined}>
+          <PixelAvatar seed={seed} size={56} borderRadius={25} />
+        </View>
       ) : reservation ? (
         <View style={{ opacity: 0.45 }}>
           <PixelAvatar seed={reservation.avatarSeed} size={56} borderRadius={25} />
@@ -238,6 +239,7 @@ const SeatSlot = memo(function SeatSlot({
           <Text style={slotStyles.chips}>{formatValue(seat.chips)}</Text>
           {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
           {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
+          {seat.isSittingOut && !seat.isFolded && <Text style={slotStyles.sitOutLabel}>SIT OUT</Text>}
           {seat.currentBet > 0 && !seat.isFolded && (
             <Text style={slotStyles.betLabel}>{seat.isAllIn ? 'ALL IN' : formatValue(seat.currentBet)}</Text>
           )}
@@ -312,14 +314,15 @@ const slotStyles = StyleSheet.create({
     maxWidth: 96, textAlign: 'center',
   },
   chips: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#00FFAA',
-    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FF88',
+    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
   allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FF6B6B' },
   foldedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.4)' },
+  sitOutLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: '#FF9944' },
   betLabel: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: gold,
-    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#FFE066',
+    textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
 });
 
@@ -733,11 +736,13 @@ interface ChipSweepProps {
   target: { x: number; y: number };
   winAmount: number;
   handName: string;
+  winnerName: string;
+  bestHandCards: CardValue[];
   onComplete: () => void;
   formatValue: (v: number) => string;
 }
 
-const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete, formatValue }: ChipSweepProps) {
+const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, winnerName, bestHandCards, onComplete, formatValue }: ChipSweepProps) {
   const chips = useRef(
     Array.from({ length: CHIP_COUNT }, () => ({
       x: new Animated.Value(origin.x),
@@ -752,6 +757,8 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
   const handNameOpacity = useRef(new Animated.Value(0)).current;
   const handNameScale = useRef(new Animated.Value(0.4)).current;
   const handNameY = useRef(new Animated.Value(0)).current;
+  const cardsOpacity = useRef(new Animated.Value(0)).current;
+  const cardsScale = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
     const chipAnims = chips.map((chip, i) => {
@@ -793,14 +800,24 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
         Animated.timing(handNameOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.timing(handNameScale, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
       ]),
-      Animated.delay(900),
+      Animated.delay(1400),
       Animated.parallel([
         Animated.timing(handNameOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
         Animated.timing(handNameY, { toValue: -18, duration: 300, useNativeDriver: true }),
       ]),
     ]);
 
-    Animated.parallel([...chipAnims, labelAnim, handNameAnim]).start(() => onComplete());
+    const cardsAnim = Animated.sequence([
+      Animated.delay(200),
+      Animated.parallel([
+        Animated.timing(cardsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.timing(cardsScale, { toValue: 1, duration: 300, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
+      ]),
+      Animated.delay(1200),
+      Animated.timing(cardsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]);
+
+    Animated.parallel([...chipAnims, labelAnim, handNameAnim, cardsAnim]).start(() => onComplete());
   }, []);
 
   return (
@@ -872,6 +889,40 @@ const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName,
       >
         +{formatValue(winAmount)}
       </Animated.Text>
+
+      {/* Winning hand cards + winner name — centered on screen */}
+      {bestHandCards.length > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: origin.x - 130,
+            top: origin.y + 20,
+            width: 260,
+            alignItems: 'center',
+            opacity: cardsOpacity,
+            transform: [{ scale: cardsScale }],
+            zIndex: 58,
+          }}
+        >
+          <Text style={{
+            fontFamily: 'PressStart2P_400Regular',
+            fontSize: 8,
+            color: '#FFF',
+            marginBottom: 6,
+            textShadowColor: '#000',
+            textShadowOffset: { width: 0, height: 1 },
+            textShadowRadius: 4,
+          }}>
+            {winnerName.toUpperCase()} WINS
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            {bestHandCards.map((card, i) => (
+              <PokerCard key={i} card={card} style={{ width: 38, height: 54 }} />
+            ))}
+          </View>
+        </Animated.View>
+      )}
     </>
   );
 });
@@ -1117,6 +1168,10 @@ export default function TableScreen() {
   // Must be before any early return (Rules of Hooks)
   const lobbyTables = useLobbyStore((s) => s.tables);
 
+  // Check if the local player is sitting out
+  const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
+  const iAmSittingOut = mySeat?.isSittingOut ?? false;
+
   const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
   const turnTimeoutMs = useGameStore((s) => s.turnTimeoutMs);
   const { secondsLeft, progress } = useTurnTimer(useGameStore((s) => s.turnTimeoutAt), turnTimeoutMs);
@@ -1322,6 +1377,8 @@ export default function TableScreen() {
           target={getSeatCenter(w.seatIndex)}
           winAmount={w.winAmount}
           handName={w.bestHandName}
+          winnerName={w.name}
+          bestHandCards={w.bestHandCards ?? []}
           onComplete={dismissHandResult}
           formatValue={fmtValue}
         />
@@ -1477,7 +1534,13 @@ export default function TableScreen() {
       {/* Action buttons — only when seated and not busted */}
       {mySeatIndex !== null && !kickedReason && (
         <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
-          {isMyTurn && (
+          {iAmSittingOut ? (
+            <Pressable
+              style={({ pressed }) => [styles.imBackBtn, pressed && { opacity: 0.8 }]}
+              onPress={() => SocketService.returnToTable(id)}>
+              <Text style={styles.imBackText}>I'M BACK</Text>
+            </Pressable>
+          ) : isMyTurn ? (
             <>
               <View style={styles.raiseRow}>
                 <RaiseAmountInput
@@ -1495,7 +1558,7 @@ export default function TableScreen() {
                 onAction={handleAction}
               />
             </>
-          )}
+          ) : null}
         </View>
       )}
     </View>
@@ -1618,6 +1681,20 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   raiseRow: { flexDirection: 'row', marginBottom: 12, paddingHorizontal: 4 },
+  imBackBtn: {
+    backgroundColor: '#00AA66',
+    borderWidth: 2, borderColor: '#00FFAA', borderRadius: 14,
+    paddingHorizontal: 32, paddingVertical: 16,
+    alignItems: 'center', alignSelf: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#00FFAA', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 10 },
+      android: { elevation: 8 }, default: {},
+    }),
+  },
+  imBackText: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 14, color: '#fff',
+    textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
 });
 
 // Leave-confirmation modal styles

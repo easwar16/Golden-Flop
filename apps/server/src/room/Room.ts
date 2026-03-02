@@ -701,6 +701,7 @@ export class Room {
 
     // Apply chip changes back to seats
     const playerResults = [];
+    const settledPlayerIds = new Set<string>();
     for (const r of result.allPlayers) {
       const seat = [...this.seats.values()].find(p => p.id === r.playerId);
       if (seat) {
@@ -708,6 +709,7 @@ export class Room {
         if (ep) {
           const startChips = ep.chips + ep.totalContributed;
           seat.chips = ep.chips + r.winAmount;
+          settledPlayerIds.add(r.playerId);
           playerResults.push({
             playerId: r.playerId,
             name: r.name,
@@ -717,6 +719,25 @@ export class Room {
             winAmount: r.winAmount,
           });
         }
+      }
+    }
+
+    // Also update chips for folded players not included in showdown results
+    // (their bets were taken by the engine but resolveShowdown only returns active players)
+    for (const ep of handState.players) {
+      if (settledPlayerIds.has(ep.id)) continue;
+      const seat = [...this.seats.values()].find(p => p.id === ep.id);
+      if (seat) {
+        const startChips = ep.chips + ep.totalContributed;
+        seat.chips = ep.chips; // no winAmount for folded players
+        playerResults.push({
+          playerId: ep.id,
+          name: ep.name,
+          seatIndex: ep.seatIndex,
+          startChips,
+          endChips: seat.chips,
+          winAmount: 0,
+        });
       }
     }
 

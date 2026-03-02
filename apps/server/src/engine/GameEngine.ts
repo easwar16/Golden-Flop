@@ -192,6 +192,9 @@ export function processAction(
       amount = toCall;
       s = applyBet(s, playerIndex, toCall, false);
       s.players[playerIndex].hasActed = true;
+      if (s.players[playerIndex].chips === 0) {
+        s.players[playerIndex].isAllIn = true;
+      }
       break;
     }
 
@@ -217,6 +220,9 @@ export function processAction(
       });
       s = applyBet(s, playerIndex, clamped, true);
       s.players[playerIndex].hasActed = true;
+      if (s.players[playerIndex].chips === 0) {
+        s.players[playerIndex].isAllIn = true;
+      }
       break;
     }
 

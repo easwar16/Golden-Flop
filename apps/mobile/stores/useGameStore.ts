@@ -40,6 +40,10 @@ export interface SeatView {
   isFolded: boolean;
   isAllIn: boolean;
   isConnected: boolean;
+  /** Player is sitting out (timed out or disconnected, waiting to return) */
+  isSittingOut: boolean;
+  /** UTC ms when the player will be removed if they don't return */
+  sitOutTimeoutAt: number | null;
   currentBet: number;
   holeCards: (CardValue | null)[];
 }
