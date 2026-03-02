@@ -153,6 +153,8 @@ export class Room {
       phase: this.phase,
       tokenMint: this.config.tokenMint,
       isPremium: this.config.isPremium,
+      turnTimeoutMs: this.config.turnTimeoutMs,
+      isPractice: this.config.isPractice ?? false,
       isPersistent: this.isPersistent,
       occupiedSeats: [...this.seats.keys()],
       reservedSeats: [...this.reservations.keys()],
@@ -595,10 +597,10 @@ export class Room {
     const result = resolveShowdown(handState);
     result.tableId = this.id;
 
-    // ── Rake calculation ────────────────────────────────────────────────────
+    // ── Rake calculation (skip for practice tables) ────────────────────────
     let rakeAmount = 0;
     const roomConfig = await getRoomConfig(this.id).catch(() => null);
-    const rakePercentage = roomConfig?.rakePercentage ?? 0;
+    const rakePercentage = this.config.isPractice ? 0 : (roomConfig?.rakePercentage ?? 0);
     const rakeCap = Number(roomConfig?.rakeCap ?? 0);
     const totalPot = handState.pot;
 

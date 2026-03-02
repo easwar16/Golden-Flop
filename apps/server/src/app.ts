@@ -18,7 +18,8 @@ import { vaultDepositRouter } from './deposit/vaultDepositRoutes';
 import { withdrawalRouter } from './withdrawal/withdrawalRoutes';
 import { adminRouter } from './admin/adminRoutes';
 import { generalLimiter } from './middleware/rateLimiter';
-import { syncFromDefinitions } from './services/room.service';
+import { seedDefaultTables } from './services/room.service';
+import { adminRouter } from './admin/adminRoutes';
 
 export interface AppOptions {
   skipBootstrap?: boolean;
@@ -75,8 +76,8 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
     const { prisma } = await import('./db/prisma');
     await prisma.$connect();
 
-    // Sync predefined room configs to PostgreSQL
-    await syncFromDefinitions();
+    // Seed default room configs to PostgreSQL (create-only, preserves admin changes)
+    await seedDefaultTables();
   }
 
   const roomManager = new RoomManager(io);

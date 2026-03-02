@@ -40,6 +40,8 @@ export interface TableConfig {
   tokenMint: string;
   /** Premium tables require higher buy-ins; used for UI badging + future gating */
   isPremium: boolean;
+  /** Practice tables use free chips — no wallet or balance required */
+  isPractice?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +137,10 @@ export interface TableInfo {
   phase: GamePhase;
   tokenMint: string;
   isPremium: boolean;
+  /** Turn timeout in milliseconds — drives the lobby speed label */
+  turnTimeoutMs: number;
+  /** Practice tables use free chips — no wallet required */
+  isPractice: boolean;
   /** True for server-bootstrapped tables that persist when empty */
   isPersistent: boolean;
   /** Which seat indices are currently occupied (0-indexed) */

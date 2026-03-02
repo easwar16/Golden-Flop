@@ -403,6 +403,7 @@ const gaStyles = StyleSheet.create({
 interface BuyInModalProps {
   visible: boolean;
   seatIndex: number;
+  isPractice?: boolean;
   tableId: string;
   minBuyIn: number;
   maxBuyIn: number;
@@ -414,7 +415,7 @@ function lamportsToSol(lamports: number): string {
 }
 
 const BuyInModal = memo(function BuyInModal({
-  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose,
+  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose, isPractice,
 }: BuyInModalProps) {
   // Input is in SOL (e.g. "0.05"), converted to lamports on confirm
   const [amount, setAmount] = useState(lamportsToSol(minBuyIn));
@@ -442,18 +443,46 @@ const BuyInModal = memo(function BuyInModal({
   }, [onClose]);
 
   const handleConfirm = useCallback(async () => {
-    const solAmount = parseFloat(amount);
-    if (isNaN(solAmount) || solAmount <= 0) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Enter a valid SOL amount` });
-      return;
+    let buyIn: number;
+    if (isPractice) {
+      buyIn = parseInt(amount, 10);
+      if (isNaN(buyIn) || buyIn <= 0) {
+        setAlert({ title: 'INVALID AMOUNT', message: 'Enter a valid chip amount' });
+        return;
+      }
+    } else {
+      const solAmount = parseFloat(amount);
+      if (isNaN(solAmount) || solAmount <= 0) {
+        setAlert({ title: 'INVALID AMOUNT', message: 'Enter a valid SOL amount' });
+        return;
+      }
+      buyIn = Math.round(solAmount * 1_000_000_000);
     }
-    const buyIn = Math.round(solAmount * 1_000_000_000);
     if (buyIn < minBuyIn) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
+      setAlert({ title: 'INVALID AMOUNT', message: isPractice
+        ? `Minimum buy-in is ${minBuyIn.toLocaleString()} chips`
+        : `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
       return;
     }
     if (buyIn > maxBuyIn) {
-      setAlert({ title: 'INVALID AMOUNT', message: `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
+      setAlert({ title: 'INVALID AMOUNT', message: isPractice
+        ? `Maximum buy-in is ${maxBuyIn.toLocaleString()} chips`
+        : `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
+      return;
+    }
+
+    // Practice tables: skip wallet/tx — just sit with free chips
+    if (isPractice) {
+      setSending(true);
+      try {
+        onClose();
+        const res = await SocketService.sitAtSeat(tableId, buyIn, seatIndex, avatarSeed, username);
+        if ('error' in res) setAlert({ title: 'CANNOT JOIN', message: res.error });
+      } catch (e) {
+        setAlert({ title: 'JOIN FAILED', message: e instanceof Error ? e.message : String(e) });
+      } finally {
+        setSending(false);
+      }
       return;
     }
 
@@ -519,7 +548,9 @@ const BuyInModal = memo(function BuyInModal({
                 <Text style={bimStyles.title}>BUY IN</Text>
                 <Text style={bimStyles.sub}>Seat {seatIndex + 1}</Text>
                 <Text style={bimStyles.range}>
-                  {lamportsToSol(minBuyIn)} – {lamportsToSol(maxBuyIn)} SOL
+                  {isPractice
+                    ? `${minBuyIn.toLocaleString()} – ${maxBuyIn.toLocaleString()} chips`
+                    : `${lamportsToSol(minBuyIn)} – ${lamportsToSol(maxBuyIn)} SOL`}
                 </Text>
                 <TextInput
                   style={bimStyles.input}
@@ -1239,6 +1270,7 @@ export default function TableScreen() {
           minBuyIn={tablMinBuyIn || 10_000_000}
           maxBuyIn={tablMaxBuyIn || 100_000_000}
           onClose={closeBuyIn}
+          isPractice={id.startsWith('practice-')}
         />
       )}
 

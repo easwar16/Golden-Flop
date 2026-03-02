@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { useMobileWallet } from '@wallet-ui/react-native-web3js';
 
@@ -7,6 +7,8 @@ type AccountLike = { address: Uint8Array };
 
 type WalletContextValue = {
   accounts: AccountLike[] | null;
+  /** Base58 wallet address — stable string, safe for useEffect dependencies. */
+  walletAddress: string | null;
   authToken: Uint8Array | undefined;
   authorize: () => Promise<void>;
   deauthorize: () => Promise<void>;
@@ -34,10 +36,16 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Convert PublicKey → Uint8Array so existing consumers (auth-context, wallet screen) stay compatible
-  const accounts: AccountLike[] | null = account
-    ? [{ address: account.publicKey.toBytes() }]
-    : null;
+  // Derive a stable base58 string from the SDK's PublicKey.
+  const walletAddress = account?.publicKey.toBase58() ?? null;
+
+  // Build the legacy accounts array. Memoised on walletAddress (string comparison)
+  // so the reference stays stable across re-renders when the key hasn't changed.
+  const accounts: AccountLike[] | null = useMemo(
+    () => (account ? [{ address: account.publicKey.toBytes() }] : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- walletAddress is the stable proxy
+    [walletAddress],
+  );
 
   const authorize = useCallback(async () => {
     setIsLoading(true);
@@ -79,8 +87,9 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
     [account, mwaSignAndSend],
   );
 
-  const value: WalletContextValue = {
+  const value: WalletContextValue = useMemo(() => ({
     accounts,
+    walletAddress,
     authToken: undefined,
     authorize,
     deauthorize,
@@ -88,7 +97,7 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
     signAndSendTransaction,
     isLoading,
     error,
-  };
+  }), [accounts, walletAddress, authorize, deauthorize, signMessage, signAndSendTransaction, isLoading, error]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

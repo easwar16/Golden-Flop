@@ -328,6 +328,7 @@ export function registerSocketHandlers(
       const seatWallet = seat?.walletAddress ?? null;
       const seatUserId = seat?.userId ?? null;
       const seatIsVault = seat?.isVaultPlayer ?? false;
+      const isPractice = room.config.isPractice ?? false;
 
       // Remove player from the room immediately — don't block on payout
       room.leave(socket.id);
@@ -336,8 +337,8 @@ export function registerSocketHandlers(
       roomManager.broadcastLobby();
       console.log(`[room] ${playerId} left ${payload.tableId}`);
 
-      // Process payout after the player has been removed
-      if (cashOutAmount > 0) {
+      // Process payout after the player has been removed (skip for practice tables)
+      if (cashOutAmount > 0 && !isPractice) {
         if (seatIsVault && seatWallet && seatUserId) {
           // ── Vault flow: transfer from vault to player's wallet on-chain ──
           try {
