@@ -181,6 +181,13 @@ export class Room {
   }
 
   /**
+   * Get a seated player by their database user ID.
+   */
+  getPlayerByUserId(userId: string): RoomPlayer | undefined {
+    return [...this.seats.values()].find(p => p.userId === userId);
+  }
+
+  /**
    * Get a seated player by their socket ID.
    */
   getPlayerBySocketId(socketId: string): RoomPlayer | undefined {

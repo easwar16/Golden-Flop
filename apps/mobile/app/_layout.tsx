@@ -14,15 +14,17 @@ if (Platform.OS !== 'web') {
 global.Buffer = Buffer;
 
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useSegments } from 'expo-router';
+import { Stack, useSegments, useRouter } from 'expo-router';
 import { LinkPreviewContextProvider } from 'expo-router/build/link/preview/LinkPreviewContext';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
-import { Animated, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Animated, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
+import * as Linking from 'expo-linking';
+import { validateInviteToken } from '@/services/InviteService';
 
 const musicOffImage = require('../assets/images/sound-off.png');
 const musicOnImage = require('../assets/images/sound-on.png');
@@ -124,6 +126,51 @@ export default function RootLayout() {
   const handleSplashFinished = useCallback(() => {
     setSplashDone(true);
   }, []);
+
+  const router = useRouter();
+
+  // ── Deep link handler for invite URLs ─────────────────────────────────
+  const handleInviteUrl = useCallback(async (url: string) => {
+    try {
+      let token: string | null = null;
+
+      // goldenflop://invite?token=X
+      if (url.includes('://invite')) {
+        const parsed = Linking.parse(url);
+        token = (parsed.queryParams?.token as string) ?? null;
+      }
+      // https://goldenflop.app/invite/X
+      const httpsMatch = url.match(/goldenflop\.app\/invite\/([A-Za-z0-9]+)/);
+      if (httpsMatch) {
+        token = httpsMatch[1];
+      }
+
+      if (!token) return;
+
+      const result = await validateInviteToken(token);
+      if (result.valid && result.roomId) {
+        router.push(`/table/${result.roomId}` as any);
+      } else {
+        Alert.alert('Invalid Invite', result.error ?? 'This invite link is invalid or expired.');
+      }
+    } catch (e) {
+      Alert.alert('Invite Error', 'Could not process invite link. Please try again.');
+    }
+  }, [router]);
+
+  useEffect(() => {
+    // Handle URL that opened the app
+    Linking.getInitialURL().then((url) => {
+      if (url) handleInviteUrl(url);
+    });
+
+    // Handle URLs while app is running
+    const sub = Linking.addEventListener('url', (event) => {
+      handleInviteUrl(event.url);
+    });
+
+    return () => sub.remove();
+  }, [handleInviteUrl]);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

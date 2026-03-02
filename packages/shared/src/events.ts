@@ -32,6 +32,7 @@ export interface SitAtSeatPayload {
   buyIn: number;        // in lamports
   avatarSeed?: string;  // override handshake value with current store value
   playerName?: string;  // override handshake value with current store value
+  inviteToken?: string; // optional invite token used to join this table
 }
 
 /** Reserve a seat before initiating a wallet transaction. */
@@ -180,6 +181,8 @@ export interface ServerToClientEvents {
   reconnect_state: (payload: TableStatePayload) => void;
   /** Sent to the leaving player after vault cash-out completes */
   cash_out_complete: (payload: CashOutCompletePayload) => void;
+  /** Broadcast when a player joins via an invite link */
+  player_joined_via_invite: (payload: { tableId: string; playerId: string; playerName: string; inviterUserId: string }) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

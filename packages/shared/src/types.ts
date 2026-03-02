@@ -198,3 +198,24 @@ export interface HandResultPayload {
   seed: string;           // revealed post-hand for provable fairness
   actionLog: ActionLogEntry[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Invite types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GenerateInviteResponse {
+  token: string;
+  deepLink: string;
+  httpsLink: string;
+  expiresAt: string; // ISO 8601
+}
+
+export interface ValidateInviteResponse {
+  valid: boolean;
+  roomId?: string;
+  roomName?: string;
+  inviterName?: string;
+  blinds?: { small: number; big: number };
+  seats?: { total: number; occupied: number; available: number };
+  error?: string;
+}

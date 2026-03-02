@@ -58,6 +58,7 @@ import { useLobbyStore } from '@/stores/useLobbyStore';
 import { useUserStore } from '@/stores/useUserStore';
 import { usePokerActions } from '@/hooks/usePokerActions';
 import { useTurnTimer } from '@/hooks/useTurnTimer';
+import { InviteModal } from '@/components/InviteModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -146,6 +147,8 @@ interface SeatSlotProps {
   isActive: boolean;
   timerProgress: number;
   canJoin: boolean;
+  /** Empty seat is tappable for invite even when already seated */
+  canInvite: boolean;
   isTaken: boolean; // seat is occupied but we don't have full data yet
   reservation?: { seatIndex: number; playerId: string; playerName: string; avatarSeed: string };
   onJoin: (seatIndex: number) => void;
@@ -158,6 +161,7 @@ const SeatSlot = memo(function SeatSlot({
   isActive,
   timerProgress,
   canJoin,
+  canInvite,
   isTaken,
   reservation,
   onJoin,
@@ -174,13 +178,13 @@ const SeatSlot = memo(function SeatSlot({
 
   return (
     <Pressable
-      onPress={canJoin ? () => onJoin(seatIndex) : undefined}
+      onPress={(canJoin || canInvite) ? () => onJoin(seatIndex) : undefined}
       style={({ pressed }) => [
         slotStyles.wrap,
         isMine && slotStyles.mine,
         isActive && slotStyles.active,
         seat?.isFolded && slotStyles.folded,
-        pressed && canJoin && slotStyles.pressed,
+        pressed && (canJoin || canInvite) && slotStyles.pressed,
         !seat && isTaken && slotStyles.takenWrap,
       ]}>
 
@@ -211,8 +215,8 @@ const SeatSlot = memo(function SeatSlot({
         </View>
       )}
 
-      {/* + join badge on empty seats only */}
-      {!seat && canJoin && !isTaken && (
+      {/* + badge on empty seats (joinable or invitable) */}
+      {!seat && (canJoin || canInvite) && !isTaken && (
         <View style={slotStyles.joinBadge}>
           <Text style={slotStyles.joinBadgeText}>+</Text>
         </View>
@@ -1181,6 +1185,9 @@ export default function TableScreen() {
   const [buyInModal, setBuyInModal] = useState<{ visible: boolean; seatIndex: number }>({
     visible: false, seatIndex: 0,
   });
+  const [inviteModal, setInviteModal] = useState<{ visible: boolean; seatIndex: number }>({
+    visible: false, seatIndex: 0,
+  });
   const [leaveConfirmVisible, setLeaveConfirmVisible] = useState(false);
   const [leavingInProgress, setLeavingInProgress] = useState(false);
   const [cashOutAlert, setCashOutAlert] = useState<{ title: string; message: string } | null>(null);
@@ -1277,6 +1284,14 @@ export default function TableScreen() {
   const handleSeatPress = useCallback((seatIndex: number) => {
     // Clear busted state so the player can re-join
     useGameStore.getState().clearKicked();
+    setInviteModal({ visible: true, seatIndex });
+  }, []);
+
+  const closeInviteModal = useCallback(() => {
+    setInviteModal((p) => ({ ...p, visible: false }));
+  }, []);
+
+  const handleSitDownFromInvite = useCallback((seatIndex: number) => {
     setBuyInModal({ visible: true, seatIndex });
   }, []);
 
@@ -1339,6 +1354,8 @@ export default function TableScreen() {
 
   // A seat is joinable only when: empty, game not in progress, and we're not already seated
   const canJoinAnySeat = !isInHand && mySeatIndex === null;
+  // Seated players can still tap empty seats to invite friends
+  const canInviteToSeat = mySeatIndex !== null;
 
   return (
     <View style={styles.container} onLayout={onLayoutRoot}>
@@ -1353,6 +1370,18 @@ export default function TableScreen() {
         <DealingCards
           deckOrigin={deckOrigin}
           mySeatCenter={getSeatCenter(mySeatIndex)}
+        />
+      )}
+
+      {/* Invite modal (shown when tapping empty seat) */}
+      {id && inviteModal.visible && (
+        <InviteModal
+          visible
+          seatIndex={inviteModal.seatIndex}
+          tableId={id}
+          showSitDown={mySeatIndex === null && !isInHand}
+          onClose={closeInviteModal}
+          onSitDown={handleSitDownFromInvite}
         />
       )}
 
@@ -1447,6 +1476,7 @@ export default function TableScreen() {
               isActive={activePlayerSeatIndex === v}
               timerProgress={activePlayerSeatIndex === v ? progress : 1}
               canJoin={canJoinAnySeat && !seatOccupied}
+              canInvite={canInviteToSeat && !seatOccupied}
               isTaken={!seats[v] && (lobbyOccupiedSeats.includes(v) || isReserved)}
               reservation={reservation}
               onJoin={handleSeatPress}

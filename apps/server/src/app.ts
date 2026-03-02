@@ -17,6 +17,7 @@ import { depositRouter } from './deposit/depositRoutes';
 import { vaultDepositRouter } from './deposit/vaultDepositRoutes';
 import { withdrawalRouter } from './withdrawal/withdrawalRoutes';
 import { adminRouter } from './admin/adminRoutes';
+import { createInviteRouter } from './invite/inviteRoutes';
 import { generalLimiter } from './middleware/rateLimiter';
 
 export interface AppOptions {
@@ -78,6 +79,9 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
 
   const roomManager = new RoomManager(io);
   const tableRegistry = new TableRegistry(io, roomManager);
+
+  // ── Invite routes (needs roomManager for room lookups) ──────────────
+  app.use('/api/invite', createInviteRouter(roomManager));
 
   if (!skipBootstrap) {
     await tableRegistry.bootstrap();

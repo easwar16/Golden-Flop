@@ -11,12 +11,13 @@
     },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "goldenflop",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.goldenflop.skr.goldenflop"
+      "bundleIdentifier": "com.goldenflop.skr.goldenflop",
+      "associatedDomains": ["applinks:goldenflop.app"]
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +28,21 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.goldenflop.skr.goldenflop"
+      "package": "com.goldenflop.skr.goldenflop",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "goldenflop.app",
+              "pathPrefix": "/invite"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",

@@ -27,6 +27,7 @@ import { settlePlayerBalance } from '../balance/settlePlayerBalance';
 import { verifySOLDepositToVault } from '../solana/SolanaService';
 import { prisma } from '../db/prisma';
 import { findOrCreateUser } from '../services/user.service';
+import { markInviteUsed, validateInvite } from '../invite/inviteService';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -311,6 +312,28 @@ export function registerSocketHandlers(
         ack?.({ seatIndex });
         roomManager.broadcastLobby();
         console.log(`[room] ${playerId} (userId:${userId ?? 'guest'}, vault:${isVaultPlayer}) sat at seat ${seatIndex} @ ${payload.tableId}`);
+
+        // ── Invite tracking ──────────────────────────────────────────────
+        const inviteToken = (payload as any).inviteToken as string | undefined;
+        if (inviteToken) {
+          void (async () => {
+            try {
+              const invite = await validateInvite(inviteToken);
+              if (invite) {
+                await markInviteUsed(inviteToken);
+                io.to(payload.tableId).emit('player_joined_via_invite', {
+                  tableId: payload.tableId,
+                  playerId,
+                  playerName: payload.playerName ?? playerName,
+                  inviterUserId: invite.inviterUserId,
+                });
+                console.log(`[invite] ${playerId} joined via invite from ${invite.inviterUserId}`);
+              }
+            } catch (e) {
+              console.error('[invite] tracking error:', e);
+            }
+          })();
+        }
       } finally {
         joinInFlight.delete(joinKey);
       }
