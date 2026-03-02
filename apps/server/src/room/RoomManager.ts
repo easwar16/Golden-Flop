@@ -107,13 +107,8 @@ export class RoomManager {
     const room = this.getRoomForSocket(socketId);
     if (!room) return;
 
-    // Immediately remove the player from the room on disconnect
-    room.leave(socketId);
-
-    // Only destroy non-persistent (dynamic) rooms when they become empty
-    if (room.playerCount === 0 && !room.isPersistent) {
-      this.deleteRoom(room.id);
-    }
+    // Mark as disconnected (NOT remove) — player gets 60s to reconnect
+    room.markDisconnected(socketId);
 
     this.broadcastLobby();
   }
