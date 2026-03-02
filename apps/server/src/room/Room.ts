@@ -383,6 +383,10 @@ export class Room {
    * empty string; once they reconnect the normal reconnect() path updates it.
    */
   restorePlayer(player: RoomPlayer): void {
+    // Ensure new fields are present for players restored from Redis
+    player.presenceState ??= 'active';
+    player.sitOutTimer ??= null;
+    player.sitOutTimeoutAt ??= null;
     this.seats.set(player.seatIndex, player);
     // Don't add to socketToSeat — socket is stale after a restart
   }
@@ -393,6 +397,9 @@ export class Room {
 
     const player = this.seats.get(seatIndex);
     if (!player) return;
+
+    // Clear any sit-out timer
+    this.clearSitOutTimer(player);
 
     this.seats.delete(seatIndex);
     this.socketToSeat.delete(socketId);
@@ -406,24 +413,33 @@ export class Room {
       seatIndex,
     });
 
-
-    // If it's the leaving player's turn, auto-fold them
+    // Handle active hand — fold the leaving player, never cancel/refund the hand
     if (this.handState) {
-      const ap = activePlayer(this.handState);
-      if (ap?.id === player.id) {
-        this.handleAutoFold(player.id);
-        return;
+      const ep = this.handState.players.find(p => p.id === player.id);
+      if (ep && !ep.isFolded && !ep.isAllIn) {
+        const ap = activePlayer(this.handState);
+        if (ap?.id === player.id) {
+          // Their turn — auto-fold (handles hand completion internally)
+          this.handleAutoFold(player.id);
+          return;
+        } else {
+          // Not their turn — mark folded directly in engine state
+          ep.isFolded = true;
+          // Check if only 1 active player remains → finish the hand
+          const remaining = this.handState.players.filter(p => !p.isFolded);
+          if (remaining.length <= 1) {
+            this.clearTurnTimer();
+            this.finishHand();
+            return;
+          }
+        }
       }
     }
 
-    // Cancel countdown if not enough players remain
-    if (this.seats.size < 2 && this.countdownTimer) {
+    // Cancel countdown if not enough active players remain
+    const activeCount = this.getActivePlayerCount();
+    if (activeCount < 2 && this.countdownTimer) {
       this.clearCountdown();
-    }
-
-    if (this.seats.size < 2 && this.handState) {
-      this.cancelHand();
-      return;
     }
 
     this.broadcastState();
