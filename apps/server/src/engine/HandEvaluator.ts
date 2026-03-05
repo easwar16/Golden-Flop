@@ -52,6 +52,18 @@ const RANK_VALUES: Record<string, number> = {
   'Q': 12, 'K': 13, 'A': 14,
 };
 
+const RANK_NAMES: Record<number, string> = {
+  2: '2s', 3: '3s', 4: '4s', 5: '5s', 6: '6s',
+  7: '7s', 8: '8s', 9: '9s', 10: '10s', 11: 'Jacks',
+  12: 'Queens', 13: 'Kings', 14: 'Aces',
+};
+
+const RANK_SHORT: Record<number, string> = {
+  2: '2', 3: '3', 4: '4', 5: '5', 6: '6',
+  7: '7', 8: '8', 9: '9', 10: 'T', 11: 'J',
+  12: 'Q', 13: 'K', 14: 'A',
+};
+
 function rv(card: CardValue): number {
   return RANK_VALUES[card.rank];
 }
@@ -99,8 +111,11 @@ function evaluate5(cards: CardValue[]): EvaluatedHand {
 
   if (isFlush && isStraight) {
     const isRoyal = values[0] === 14 && values[4] === 10;
-    const rank = isRoyal ? HandRank.RoyalFlush : HandRank.StraightFlush;
-    return make(rank, sorted, [straightHighCard(values)]);
+    if (isRoyal) {
+      return make(HandRank.RoyalFlush, 'Royal Flush', sorted, [straightHighCard(values)]);
+    }
+    const high = straightHighCard(values);
+    return make(HandRank.StraightFlush, `Straight Flush, ${RANK_SHORT[high]} high`, sorted, [high]);
   }
 
   const groups = groupByCount(rankCounts);
@@ -108,47 +123,48 @@ function evaluate5(cards: CardValue[]): EvaluatedHand {
   if (groups[4]) {
     const quad = groups[4][0];
     const kicker = sorted.find(c => rv(c) !== quad)!;
-    return make(HandRank.FourOfAKind, sorted, [quad, rv(kicker)]);
+    return make(HandRank.FourOfAKind, `Four ${RANK_NAMES[quad]}, ${RANK_SHORT[rv(kicker)]} kicker`, sorted, [quad, rv(kicker)]);
   }
 
   if (groups[3] && groups[2]) {
-    return make(HandRank.FullHouse, sorted, [groups[3][0], groups[2][0]]);
+    return make(HandRank.FullHouse, `Full House, ${RANK_NAMES[groups[3][0]]} over ${RANK_NAMES[groups[2][0]]}`, sorted, [groups[3][0], groups[2][0]]);
   }
 
   if (isFlush) {
-    return make(HandRank.Flush, sorted, values);
+    return make(HandRank.Flush, `Flush, ${RANK_SHORT[values[0]]} high`, sorted, values);
   }
 
   if (isStraight) {
-    return make(HandRank.Straight, sorted, [straightHighCard(values)]);
+    const high = straightHighCard(values);
+    return make(HandRank.Straight, `Straight, ${RANK_SHORT[high]} high`, sorted, [high]);
   }
 
   if (groups[3]) {
     const kickers = sorted.filter(c => rv(c) !== groups[3][0]).map(rv);
-    return make(HandRank.ThreeOfAKind, sorted, [groups[3][0], ...kickers]);
+    return make(HandRank.ThreeOfAKind, `Three ${RANK_NAMES[groups[3][0]]}, ${RANK_SHORT[kickers[0]]} kicker`, sorted, [groups[3][0], ...kickers]);
   }
 
   if (groups[2] && groups[2].length >= 2) {
     const [highPair, lowPair] = groups[2].sort((a, b) => b - a);
     const kicker = sorted.find(c => rv(c) !== highPair && rv(c) !== lowPair)!;
-    return make(HandRank.TwoPair, sorted, [highPair, lowPair, rv(kicker)]);
+    return make(HandRank.TwoPair, `Two Pair, ${RANK_NAMES[highPair]} and ${RANK_NAMES[lowPair]}`, sorted, [highPair, lowPair, rv(kicker)]);
   }
 
   if (groups[2]) {
     const pair = groups[2][0];
     const kickers = sorted.filter(c => rv(c) !== pair).map(rv);
-    return make(HandRank.OnePair, sorted, [pair, ...kickers]);
+    return make(HandRank.OnePair, `Pair of ${RANK_NAMES[pair]}, ${RANK_SHORT[kickers[0]]} kicker`, sorted, [pair, ...kickers]);
   }
 
-  return make(HandRank.HighCard, sorted, values);
+  return make(HandRank.HighCard, `${RANK_SHORT[values[0]]} High`, sorted, values);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function make(rank: HandRank, cards: CardValue[], tiebreakers: number[]): EvaluatedHand {
-  return { rank, name: HAND_RANK_NAMES[rank], cards, tiebreakers };
+function make(rank: HandRank, name: string, cards: CardValue[], tiebreakers: number[]): EvaluatedHand {
+  return { rank, name, cards, tiebreakers };
 }
 
 function checkStraight(sortedValues: number[]): boolean {

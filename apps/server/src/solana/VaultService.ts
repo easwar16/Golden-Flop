@@ -217,6 +217,30 @@ export async function getVaultBalance(roomId: string): Promise<bigint> {
 }
 
 /**
+ * Query the on-chain SPL token balance of a room's vault ATA.
+ *
+ * @param roomId Room ID
+ * @param mint   Base58 SPL token mint address
+ * @returns Balance in smallest token units
+ */
+export async function getVaultSPLBalance(roomId: string, mint: string): Promise<bigint> {
+  const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
+
+  const connection = getConnection();
+  const keypair = getVaultKeypair(roomId);
+  const mintPubkey = new PublicKey(mint);
+  const vaultATA = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
+
+  try {
+    const account = await getAccount(connection, vaultATA, 'confirmed');
+    return account.amount;
+  } catch {
+    // ATA doesn't exist yet — balance is 0
+    return 0n;
+  }
+}
+
+/**
  * Clear the keypair cache. Useful for testing.
  */
 export function clearKeypairCache(): void {

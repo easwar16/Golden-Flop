@@ -150,6 +150,10 @@ export class Room {
     return this.handState?.phase ?? 'waiting';
   }
 
+  get tokenType(): 'SOL' | 'SEEKER' {
+    return this.config.tokenMint === 'SOL' ? 'SOL' : 'SEEKER';
+  }
+
   toTableInfo(): TableInfo {
     return {
       id: this.id,
@@ -169,6 +173,7 @@ export class Room {
       isPersistent: this.isPersistent,
       occupiedSeats: [...this.seats.keys()],
       reservedSeats: [...this.reservations.keys()],
+      tokenType: this.tokenType,
     };
   }
 
@@ -187,6 +192,20 @@ export class Room {
     const seatIndex = this.socketToSeat.get(socketId);
     if (seatIndex === undefined) return undefined;
     return this.seats.get(seatIndex);
+  }
+
+  /**
+   * Get all seated vault players with their wallet addresses and chip counts.
+   * Used by admin emergency refund to return funds to players.
+   */
+  getVaultPlayers(): Array<{ userId: string; walletAddress: string; chips: number }> {
+    const result: Array<{ userId: string; walletAddress: string; chips: number }> = [];
+    for (const player of this.seats.values()) {
+      if (player.isVaultPlayer && player.walletAddress && player.userId && player.chips > 0) {
+        result.push({ userId: player.userId, walletAddress: player.walletAddress, chips: player.chips });
+      }
+    }
+    return result;
   }
 
   // ─── Seat reservations (pre-wallet-tx lock) ─────────────────────────────
@@ -383,12 +402,17 @@ export class Room {
    * empty string; once they reconnect the normal reconnect() path updates it.
    */
   restorePlayer(player: RoomPlayer): void {
-    // Ensure new fields are present for players restored from Redis
-    player.presenceState ??= 'active';
-    player.sitOutTimer ??= null;
-    player.sitOutTimeoutAt ??= null;
+    // Restored players have no socket — mark as disconnected so the
+    // sit-out timer gives them a window to reconnect, then removes them.
+    player.isConnected = false;
+    player.presenceState = 'disconnected';
+    player.sitOutTimer = null;
+    player.sitOutTimeoutAt = null;
     this.seats.set(player.seatIndex, player);
     // Don't add to socketToSeat — socket is stale after a restart
+
+    // Start sit-out timer — player has 60s to reconnect before being removed
+    this.startSitOutTimer(player);
   }
 
   leave(socketId: string): void {
@@ -694,7 +718,11 @@ export class Room {
           (p: RoomPlayer) => winners.some(w => w.playerId === p.id),
         );
         if (winnerSeatForRake?.userId) {
-          void processRakeTransfer(this.id, BigInt(rakeAmount), winnerSeatForRake.userId);
+          // SEEKER rake is in whole tokens; on-chain SPL needs smallest units (9 decimals)
+          const rakeOnChain = this.tokenType === 'SEEKER'
+            ? BigInt(rakeAmount) * 1_000_000_000n
+            : BigInt(rakeAmount);
+          void processRakeTransfer(this.id, rakeOnChain, winnerSeatForRake.userId, this.tokenType);
         }
       }
     }
@@ -1042,6 +1070,7 @@ export class Room {
       bigBlind: this.config.bigBlind,
       minBuyIn: this.config.minBuyIn,
       maxBuyIn: this.config.maxBuyIn,
+      tokenType: this.tokenType,
     };
   }
   // ─── Presence state management ────────────────────────────────────────────
@@ -1109,6 +1138,18 @@ export class Room {
   }
 
   /**
+   * Force-remove all disconnected players immediately.
+   * Returns the number of players removed.
+   */
+  purgeDisconnectedPlayers(): number {
+    const disconnected = [...this.seats.values()].filter(p => !p.isConnected);
+    for (const player of disconnected) {
+      this.removeSitOutPlayer(player.id);
+    }
+    return disconnected.length;
+  }
+
+  /**
    * Remove a player whose sit-out timer has expired.
    * Folds them if in a hand, settles their balance, frees their seat.
    */
@@ -1154,7 +1195,7 @@ export class Room {
 
     // Settle balance (return chips to wallet or internal balance)
     void settlePlayerBalance(
-      { userId: player.userId, walletAddress: player.walletAddress, isVaultPlayer: player.isVaultPlayer, chips: player.chips },
+      { userId: player.userId, walletAddress: player.walletAddress, isVaultPlayer: player.isVaultPlayer, chips: player.chips, tokenType: this.tokenType },
       this.id,
       this.config.isPractice ?? false,
     ).then(({ txSignature }) => {

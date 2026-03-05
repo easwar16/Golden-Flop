@@ -13,7 +13,7 @@
  */
 
 import { prisma } from '../db/prisma';
-import { transferSOLFromVault, getVaultBalance } from './VaultService';
+import { transferSOLFromVault, getVaultBalance, transferSPLFromVault, getVaultSPLBalance } from './VaultService';
 
 // ─── Per-room mutex ──────────────────────────────────────────────────────────
 // Vault has one keypair per room. Serialize signing to avoid nonce conflicts.
@@ -87,6 +87,7 @@ export async function processPlayerCashOut(
   userId: string,
   playerWallet: string,
   lamports: bigint,
+  tokenType: 'SOL' | 'SEEKER' = 'SOL',
 ): Promise<string | null> {
   if (lamports <= 0n) return null;
 
@@ -117,6 +118,37 @@ export async function processPlayerCashOut(
     });
 
     try {
+      if (tokenType === 'SEEKER') {
+        // SPL token cash-out — no VAULT_RESERVE deduction (SPL balance is independent of SOL rent)
+        const seekerMint = process.env.SEEKER_MINT;
+        if (!seekerMint) throw new Error('SEEKER_MINT env var is not set');
+
+        const vaultBalance = await getVaultSPLBalance(roomId, seekerMint);
+        if (vaultBalance <= 0n) {
+          console.error(`[PayoutService] Vault SPL balance 0. Payout ${payout.id} marked FAILED.`);
+          await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+          return null;
+        }
+
+        const transferAmount = lamports > vaultBalance ? vaultBalance : lamports;
+        if (transferAmount < lamports) {
+          console.warn(`[PayoutService] Vault can only afford ${transferAmount} of ${lamports} SEEKER units. Partial payout.`);
+        }
+
+        const signature = await withRetry(() =>
+          transferSPLFromVault(roomId, playerWallet, transferAmount, seekerMint),
+        );
+
+        await prisma.payout.update({
+          where: { id: payout.id },
+          data: { status: 'CONFIRMED', transactionSignature: signature },
+        });
+
+        console.log(`[PayoutService] SEEKER cash-out: ${lamports} → ${playerWallet} (tx: ${signature})`);
+        return signature;
+      }
+
+      // SOL cash-out (existing logic)
       // Check vault balance — must keep VAULT_RESERVE (rent-exempt + tx fee)
       const vaultBalance = await getVaultBalance(roomId);
       const maxTransferable = vaultBalance - VAULT_RESERVE;
@@ -181,13 +213,12 @@ export async function processRakeTransfer(
   roomId: string,
   lamports: bigint,
   rakeUserId: string,
+  tokenType: 'SOL' | 'SEEKER' = 'SOL',
 ): Promise<string | null> {
   if (lamports <= 0n) return null;
 
-  // Skip on-chain transfer for tiny rake amounts — the destination account
-  // needs at least the rent-exempt minimum (~890880 lamports) to exist.
-  // Small rakes accumulate in the vault and are collected via the sweep endpoint.
-  if (lamports < RENT_EXEMPT_MIN) {
+  // Skip on-chain transfer for tiny rake amounts (SOL only — SPL has no rent concern)
+  if (tokenType === 'SOL' && lamports < RENT_EXEMPT_MIN) {
     console.log(
       `[PayoutService] rake ${lamports} lamports too small for on-chain transfer (need ${RENT_EXEMPT_MIN}). Accumulating in vault.`,
     );
@@ -206,6 +237,34 @@ export async function processRakeTransfer(
     });
 
     try {
+      const treasury = getTreasuryAddress();
+
+      if (tokenType === 'SEEKER') {
+        const seekerMint = process.env.SEEKER_MINT;
+        if (!seekerMint) throw new Error('SEEKER_MINT env var is not set');
+
+        const vaultBalance = await getVaultSPLBalance(roomId, seekerMint);
+        if (vaultBalance <= 0n) {
+          console.warn(`[PayoutService] Vault SPL balance 0. Skipping rake payout ${payout.id}.`);
+          await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+          return null;
+        }
+        const transferAmount = lamports > vaultBalance ? vaultBalance : lamports;
+
+        const signature = await withRetry(() =>
+          transferSPLFromVault(roomId, treasury, transferAmount, seekerMint),
+        );
+
+        await prisma.payout.update({
+          where: { id: payout.id },
+          data: { status: 'CONFIRMED', transactionSignature: signature },
+        });
+
+        console.log(`[PayoutService] SEEKER rake: ${lamports} → treasury (tx: ${signature})`);
+        return signature;
+      }
+
+      // SOL rake (existing logic)
       // Check vault can afford rake transfer while staying rent-exempt
       const vaultBalance = await getVaultBalance(roomId);
       const maxTransferable = vaultBalance - VAULT_RESERVE;
@@ -218,7 +277,6 @@ export async function processRakeTransfer(
       }
       const transferAmount = lamports > maxTransferable ? maxTransferable : lamports;
 
-      const treasury = getTreasuryAddress();
       const signature = await withRetry(() =>
         transferSOLFromVault(roomId, treasury, transferAmount),
       );
