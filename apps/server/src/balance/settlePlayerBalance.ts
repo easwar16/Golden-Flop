@@ -12,6 +12,7 @@ export interface SettlementTarget {
   walletAddress?: string | null;
   isVaultPlayer?: boolean;
   chips: number;
+  tokenType?: 'SOL' | 'SEEKER';
 }
 
 /**
@@ -31,11 +32,18 @@ export async function settlePlayerBalance(
 
   if (target.isVaultPlayer && target.walletAddress && target.userId) {
     try {
+      // SEEKER chips are whole tokens; on-chain SPL uses smallest units (9 decimals)
+      const tokenType = target.tokenType ?? 'SOL';
+      const onChainAmount = tokenType === 'SEEKER'
+        ? BigInt(target.chips) * 1_000_000_000n
+        : BigInt(target.chips);
+
       const sig = await processPlayerCashOut(
         tableId,
         target.userId,
         target.walletAddress,
-        BigInt(target.chips),
+        onChainAmount,
+        tokenType,
       );
       if (sig) {
         console.log(`[economy] vault cash-out: ${target.chips} lamports → ${target.walletAddress} (tx: ${sig})`);
@@ -48,8 +56,8 @@ export async function settlePlayerBalance(
       return { txSignature: null };
     }
   } else if (target.userId) {
-    await processCashOut(target.userId, BigInt(target.chips));
-    console.log(`[economy] cashed out ${target.chips} chips → userId:${target.userId}`);
+    await processCashOut(target.userId, BigInt(target.chips), target.tokenType ?? 'SOL');
+    console.log(`[economy] cashed out ${target.chips} chips (${target.tokenType ?? 'SOL'}) → userId:${target.userId}`);
     return {};
   }
 

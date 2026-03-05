@@ -182,6 +182,7 @@ interface VaultInfo {
   vault: string;
   network: 'devnet' | 'mainnet-beta';
   tokenType: 'SOL' | 'SEEKER';
+  seekerMint: string | null;
 }
 
 /**
@@ -224,6 +225,54 @@ export async function buildVaultBuyInTransaction(
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: fromPubkey });
   tx.add(
     SystemProgram.transfer({ fromPubkey, toPubkey, lamports }),
+  );
+
+  return tx;
+}
+
+/**
+ * Build an unsigned SPL token transfer Transaction to a room's vault ATA.
+ * Used for SEEKER token buy-ins.
+ *
+ * @param fromAddress  sender wallet (base58)
+ * @param amount       token amount in smallest unit
+ * @param roomId       room whose vault receives the deposit
+ * @param decimals     token decimals (default 9)
+ * @param network      devnet | mainnet-beta (optional, fetched from server if omitted)
+ */
+export async function buildSPLVaultBuyInTransaction(
+  fromAddress: string,
+  amount: bigint,
+  roomId: string,
+  decimals: number = 9,
+  network?: 'devnet' | 'mainnet-beta',
+): Promise<Transaction> {
+  const { getAssociatedTokenAddress, createTransferCheckedInstruction } =
+    await import('@solana/spl-token');
+
+  const vaultInfo = await fetchVaultAddress(roomId);
+  if (!vaultInfo.seekerMint) throw new Error('Seeker mint not configured on server');
+
+  const conn = getConnection(network ?? vaultInfo.network);
+  const mintPubkey = new PublicKey(vaultInfo.seekerMint);
+  const fromPubkey = new PublicKey(fromAddress);
+  const vaultPubkey = new PublicKey(vaultInfo.vault);
+
+  const fromATA = await getAssociatedTokenAddress(mintPubkey, fromPubkey);
+  const vaultATA = await getAssociatedTokenAddress(mintPubkey, vaultPubkey);
+
+  const { blockhash } = await conn.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: fromPubkey });
+
+  tx.add(
+    createTransferCheckedInstruction(
+      fromATA,
+      mintPubkey,
+      vaultATA,
+      fromPubkey,
+      amount,
+      decimals,
+    ),
   );
 
   return tx;

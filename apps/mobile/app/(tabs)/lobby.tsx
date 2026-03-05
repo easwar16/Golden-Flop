@@ -34,6 +34,9 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import * as Clipboard from 'expo-clipboard';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
 import { SocketService } from '@/services/SocketService';
 import { useLobbyStore, LobbyTable } from '@/stores/useLobbyStore';
 import { getPlayerName } from '@/utils/player-identity';
@@ -231,6 +234,26 @@ const PRACTICE_NAMES: Record<string, string> = {
   'practice-highroller': 'HIGH ROLLER',
 };
 
+// ─── SEEKER tier mapping ──────────────────────────────────────────────────────
+
+function getSeekerTier(bigBlind: number): Tier {
+  if (bigBlind <= 10)   return { label: 'LOW',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.55)',  shadowColor: '#BF5FFF', isVip: false };
+  if (bigBlind <= 50)   return { label: 'MID',  accentColor: '#9B30FF', borderColor: 'rgba(155,48,255,0.75)',  shadowColor: '#9B30FF', isVip: false };
+  return                        { label: 'HIGH', accentColor: '#7B1FA2', borderColor: 'rgba(123,31,162,0.75)', shadowColor: '#7B1FA2', isVip: false };
+}
+
+const SEEKER_NAMES: Record<string, string> = {
+  'seeker-low-1':  'SEEKER LOUNGE',
+  'seeker-mid-1':  'SEEKER ARENA',
+  'seeker-high-1': 'SEEKER VAULT',
+};
+
+function formatSeeker(amount: number): string {
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
+  return `${amount}`;
+}
+
 // ─── Table card ───────────────────────────────────────────────────────────────
 
 type TableCardProps = {
@@ -242,11 +265,12 @@ type TableCardProps = {
   onPressIn: (id: string) => void;
   onPressOut: () => void;
   onJoinPress: (t: LobbyTable) => void;
+  onShowDetails: () => void;
   index: number;
   scrollY: SharedValue<number>;
 };
 
-const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedId, onPressIn, onPressOut, onJoinPress, index, scrollY }: TableCardProps) {
+const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedId, onPressIn, onPressOut, onJoinPress, onShowDetails, index, scrollY }: TableCardProps) {
   const activity = getActivity(t.playerCount, t.maxPlayers ?? MAX_PLAYERS);
   const isPressed = pressedId === t.id;
   const isHot     = activity.level === 'hot';
@@ -318,13 +342,14 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
   });
 
   const isPractice = t.isPractice ?? false;
+  const isSeeker  = t.tokenType === 'SEEKER';
   const speed     = getTableSpeed(t.turnTimeoutMs);
-  const avgPot    = isPractice ? Math.round(t.bigBlind * 4.5) : (t.bigBlind * 4.5) / LAMPORTS_PER_SOL;
+  const avgPot    = isPractice || isSeeker ? Math.round(t.bigBlind * 4.5) : (t.bigBlind * 4.5) / LAMPORTS_PER_SOL;
   const speedColor = speed === 'SLOW' ? '#22c55e' : speed === 'NORMAL' ? '#EAB308' : '#FF6B35';
 
   return (
     <Reanimated.View style={parallaxStyle}>
-      <Pressable onPress={() => setExpanded((v) => !v)}>
+      <Pressable onPress={() => setExpanded((v) => !v)} onLongPress={onShowDetails}>
         <View style={[
           styles.tableCard,
           { borderColor: tier.borderColor },
@@ -360,13 +385,27 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
           <View style={styles.tableCardBody}>
             {/* Name row */}
             <View style={styles.tableNameRow}>
-              <Text style={styles.tableName}>{name}</Text>
+              <Text style={styles.tableName} numberOfLines={1}>{name}</Text>
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  Clipboard.setStringAsync(t.id);
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [styles.copyIdBtn, pressed && { opacity: 0.5 }]}>
+                <MaterialCommunityIcons name="content-copy" size={12} color="rgba(255,255,255,0.4)" />
+              </Pressable>
               <View style={[styles.tierBadge, { borderColor: tier.accentColor, backgroundColor: tier.accentColor + '22' }]}>
                 <Text style={[styles.tierBadgeText, { color: tier.accentColor }]}>{tier.label}</Text>
               </View>
               {isPractice && (
                 <View style={[styles.tableBadge, { borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)' }]}>
                   <Text style={[styles.tableBadgeText, { color: '#22c55e' }]}>FREE CHIPS</Text>
+                </View>
+              )}
+              {isSeeker && (
+                <View style={[styles.tableBadge, { borderColor: '#BF5FFF', backgroundColor: 'rgba(191,95,255,0.15)' }]}>
+                  <Text style={[styles.tableBadgeText, { color: '#BF5FFF' }]}>SEEKER</Text>
                 </View>
               )}
               {!isPractice && badge && (
@@ -379,29 +418,32 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
             <Text style={styles.tableDetail}>
               {isPractice
                 ? `Blinds: ${t.smallBlind}/${t.bigBlind} chips`
+                : isSeeker
+                ? `Blinds: ${formatSeeker(t.smallBlind)} / ${formatSeeker(t.bigBlind)} SEEKER`
                 : `Blinds: ${(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / ${(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL`}
             </Text>
 
             <View style={styles.tableRow}>
               <Animated.View style={[styles.statusDot, { backgroundColor: activity.dotColor, opacity: pulseAnim }]} />
               <Text style={[styles.tableDetail, isHot && styles.tableDetailHot]}>
-                {t.playerCount}/{t.maxPlayers ?? MAX_PLAYERS} players{isHot ? '  🔥' : ''}
+                {t.playerCount}/{t.maxPlayers ?? MAX_PLAYERS} players{isHot ? '' : ''}
               </Text>
             </View>
 
             <Text style={styles.tableDetail}>
               {isPractice
                 ? `Start: ${t.minBuyIn.toLocaleString()} chips`
+                : isSeeker
+                ? `Min buy-in: ${formatSeeker(t.minBuyIn)} SEEKER`
                 : `Min buy-in: ${(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL`}
             </Text>
 
-            {/* Expanded details */}
             {expanded && (
               <View style={styles.expandedBlock}>
                 <View style={styles.expandedRow}>
                   <Text style={styles.expandedLabel}>AVG POT</Text>
                   <Text style={styles.expandedValue}>
-                    {isPractice ? `${avgPot.toLocaleString()} chips` : `${avgPot.toFixed(4)} SOL`}
+                    {isPractice || isSeeker ? `${avgPot.toLocaleString()}${isSeeker ? ' SEEKER' : ' chips'}` : `${avgPot.toFixed(4)} SOL`}
                   </Text>
                 </View>
                 <View style={styles.expandedRow}>
@@ -412,6 +454,9 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
                   <Text style={styles.expandedLabel}>SEATS LEFT</Text>
                   <Text style={styles.expandedValue}>{(t.maxPlayers ?? MAX_PLAYERS) - t.playerCount}</Text>
                 </View>
+                <Pressable onPress={onShowDetails} style={styles.detailsBtn}>
+                  <Text style={styles.detailsBtnText}>ROOM INFO</Text>
+                </Pressable>
               </View>
             )}
           </View>
@@ -468,6 +513,99 @@ function FilterBar({ sort, onSort, joinableOnly, onToggleJoinable, totalCount, s
   );
 }
 
+// ─── Room Details Modal ──────────────────────────────────────────────────────
+
+type RoomDetailsModalProps = {
+  visible: boolean;
+  table: LobbyTable | null;
+  name: string;
+  tier: Tier;
+  onClose: () => void;
+  onJoin: (t: LobbyTable) => void;
+};
+
+function RoomDetailsModal({ visible, table, name, tier, onClose, onJoin }: RoomDetailsModalProps) {
+  const [copied, setCopied] = useState(false);
+
+  if (!table) return null;
+
+  const isPractice = table.isPractice ?? false;
+  const isSeeker = table.tokenType === 'SEEKER';
+  const blindsText = isPractice
+    ? `${table.smallBlind}/${table.bigBlind} chips`
+    : isSeeker
+    ? `${formatSeeker(table.smallBlind)} / ${formatSeeker(table.bigBlind)} SEEKER`
+    : `${(table.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / ${(table.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL`;
+  const buyInText = isPractice
+    ? `${table.minBuyIn.toLocaleString()} – ${table.maxBuyIn.toLocaleString()} chips`
+    : isSeeker
+    ? `${formatSeeker(table.minBuyIn)} – ${formatSeeker(table.maxBuyIn)} SEEKER`
+    : `${(table.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} – ${(table.maxBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL`;
+  const speed = getTableSpeed(table.turnTimeoutMs);
+  const speedColor = speed === 'SLOW' ? '#22c55e' : speed === 'NORMAL' ? '#EAB308' : '#FF6B35';
+
+  const handleCopyId = async () => {
+    await Clipboard.setStringAsync(table.id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={rdm.overlay} onPress={onClose}>
+        <Pressable style={[rdm.panel, { borderColor: tier.accentColor }]} onPress={(e) => e.stopPropagation?.()}>
+          {/* Title */}
+          <Text style={[rdm.title, { color: tier.accentColor }]}>{name}</Text>
+          <View style={[rdm.tierTag, { borderColor: tier.accentColor, backgroundColor: tier.accentColor + '22' }]}>
+            <Text style={[rdm.tierTagText, { color: tier.accentColor }]}>{tier.label}</Text>
+          </View>
+
+          {/* Room ID — tappable to copy */}
+          <Pressable onPress={handleCopyId} style={rdm.idRow}>
+            <Text style={rdm.label}>ROOM ID</Text>
+            <View style={rdm.idValueRow}>
+              <Text style={rdm.idValue}>{table.id}</Text>
+              <View style={[rdm.copyBadge, copied && { borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                <Text style={[rdm.copyBadgeText, copied && { color: '#22c55e' }]}>
+                  {copied ? 'COPIED!' : 'TAP TO COPY'}
+                </Text>
+              </View>
+            </View>
+          </Pressable>
+
+          {/* Details grid */}
+          <View style={rdm.divider} />
+          <View style={rdm.detailRow}>
+            <Text style={rdm.label}>BLINDS</Text>
+            <Text style={rdm.value}>{blindsText}</Text>
+          </View>
+          <View style={rdm.detailRow}>
+            <Text style={rdm.label}>PLAYERS</Text>
+            <Text style={rdm.value}>{table.playerCount} / {table.maxPlayers ?? MAX_PLAYERS}</Text>
+          </View>
+          <View style={rdm.detailRow}>
+            <Text style={rdm.label}>BUY-IN</Text>
+            <Text style={rdm.value}>{buyInText}</Text>
+          </View>
+          <View style={rdm.detailRow}>
+            <Text style={rdm.label}>SPEED</Text>
+            <Text style={[rdm.value, { color: speedColor }]}>{speed}</Text>
+          </View>
+
+          {/* Actions */}
+          <View style={rdm.divider} />
+          <Pressable style={[rdm.joinBtn, { borderColor: tier.accentColor }]} onPress={() => { onClose(); onJoin(table); }}>
+            <Text style={[rdm.joinBtnText, { color: tier.accentColor }]}>JOIN TABLE</Text>
+          </Pressable>
+          <Pressable style={rdm.closeBtn} onPress={onClose}>
+            <Text style={rdm.closeBtnText}>CLOSE</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 type DisplayRow = { t: LobbyTable; name: string; tier: Tier };
@@ -478,11 +616,12 @@ export default function LobbyScreen() {
   const { signOut } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<'SOLANA' | 'PRACTICE'>('SOLANA');
+  const [activeTab, setActiveTab] = useState<'SOLANA' | 'SEEKER' | 'PRACTICE'>('SOLANA');
   const [sortBy, setSortBy] = useState<SortKey>('BLINDS');
   const [joinableOnly, setJoinableOnly] = useState(false);
   const [pressedJoinTableId, setPressedJoinTableId] = useState<string | null>(null);
-
+  const [searchQuery, setSearchQuery] = useState('');
+  const [detailsRow, setDetailsRow] = useState<DisplayRow | null>(null);
 
   // Create form (hidden behind feature flag)
   const [showCreate] = useState(false);
@@ -532,8 +671,9 @@ export default function LobbyScreen() {
   const addressBase58 = rawAddress != null ? new PublicKey(rawAddress).toBase58() : null;
 
   const [solBalance, setSolBalance] = useState<string | null>(null);
+  const [seekerBalance, setSeekerBalance] = useState<string | null>(null);
   useEffect(() => {
-    if (!addressBase58) { setSolBalance(null); return; }
+    if (!addressBase58) { setSolBalance(null); setSeekerBalance(null); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -541,20 +681,43 @@ export default function LobbyScreen() {
         const pubkey = new PublicKey(addressBase58);
         const lamports = await connection.getBalance(pubkey);
         if (!cancelled) setSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(2) + ' SOL');
+
+        // Fetch SEEKER SPL token balance
+        try {
+          const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
+          const seekerMintStr = seekerTables.length > 0
+            ? await (async () => {
+                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001'}/api/vault/${seekerTables[0].id}/address`);
+                if (!res.ok) return null;
+                const data = await res.json() as { seekerMint?: string };
+                return data.seekerMint ?? null;
+              })()
+            : null;
+          if (seekerMintStr && !cancelled) {
+            const mintPubkey = new PublicKey(seekerMintStr);
+            const ata = await getAssociatedTokenAddress(mintPubkey, pubkey);
+            const account = await getAccount(connection, ata);
+            const amount = Number(account.amount) / 1_000_000_000;
+            if (!cancelled) setSeekerBalance(amount >= 1000 ? `${(amount / 1000).toFixed(1)}K SEEKER` : `${amount.toFixed(0)} SEEKER`);
+          }
+        } catch {
+          if (!cancelled) setSeekerBalance('0 SEEKER');
+        }
       } catch {
         if (cancelled) return;
-        // Balance unreachable — disconnect wallet and clear session
         setSolBalance(null);
+        setSeekerBalance(null);
         deauthorize().catch(() => {});
         signOut().catch(() => {});
       }
     })();
     return () => { cancelled = true; };
-  }, [addressBase58, deauthorize, signOut]);
+  }, [addressBase58, deauthorize, signOut, seekerTables]);
 
   // Table names are computed once per render cycle; reset counter first
   // Only compute for non-practice tables (practice tables use PRACTICE_NAMES)
-  const solTables = useMemo(() => tables.filter((t) => !t.isPractice), [tables]);
+  const solTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType !== 'SEEKER'), [tables]);
+  const seekerTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType === 'SEEKER'), [tables]);
   const tableNames = useMemo(() => {
     const counts: Record<string, number> = {};
     return solTables.map((t) => {
@@ -606,6 +769,19 @@ export default function LobbyScreen() {
     handleJoin(best.id);
   }, [isWalletConnected, promptConnectWallet, solTables, handleJoin]);
 
+  const handleQuickJoinSeeker = useCallback(() => {
+    if (!isWalletConnectedRef.current) { promptConnectWallet(); return; }
+    if (!seekerTables.length) return;
+    const joinable = seekerTables.filter((t) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
+    if (!joinable.length) return;
+    const best = joinable.sort((a, b) => {
+      const aScore = a.playerCount * 10 - a.bigBlind;
+      const bScore = b.playerCount * 10 - b.bigBlind;
+      return bScore - aScore;
+    })[0];
+    handleJoin(best.id);
+  }, [isWalletConnected, promptConnectWallet, seekerTables, handleJoin]);
+
   const handleCreate = async () => {
     const sb = parseInt(smallBlind, 10) || 10;
     const bb = parseInt(bigBlind, 10) || 20;
@@ -630,6 +806,19 @@ export default function LobbyScreen() {
         }));
     }
 
+    if (activeTab === 'SEEKER') {
+      let list = seekerTables
+        .map((t) => ({ t, name: SEEKER_NAMES[t.id] ?? t.name, tier: getSeekerTier(t.bigBlind) }));
+
+      if (joinableOnly) list = list.filter(({ t }) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
+
+      if (sortBy === 'BLINDS')  list.sort((a, b) => a.t.bigBlind - b.t.bigBlind || a.t.id.localeCompare(b.t.id));
+      if (sortBy === 'PLAYERS') list.sort((a, b) => b.t.playerCount - a.t.playerCount || a.t.id.localeCompare(b.t.id));
+      if (sortBy === 'BUY-IN')  list.sort((a, b) => a.t.minBuyIn - b.t.minBuyIn || a.t.id.localeCompare(b.t.id));
+
+      return list;
+    }
+
     let list = solTables
       .map((t, i) => ({ t, name: tableNames[i] ?? 'TABLE', tier: getTier(t.bigBlind) }));
 
@@ -639,8 +828,16 @@ export default function LobbyScreen() {
     if (sortBy === 'PLAYERS') list.sort((a, b) => b.t.playerCount - a.t.playerCount || a.t.id.localeCompare(b.t.id));
     if (sortBy === 'BUY-IN')  list.sort((a, b) => a.t.minBuyIn - b.t.minBuyIn || a.t.id.localeCompare(b.t.id));
 
+    // Search filter — matches room ID or display name (case insensitive)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(({ t, name: n }) =>
+        t.id.toLowerCase().includes(q) || n.toLowerCase().includes(q),
+      );
+    }
+
     return list;
-  }, [tables, solTables, tableNames, sortBy, joinableOnly, activeTab]);
+  }, [tables, solTables, seekerTables, tableNames, sortBy, joinableOnly, activeTab, searchQuery]);
 
   const renderItem = useCallback(({ item, index }: { item: DisplayRow; index: number }) => (
     <TableCard
@@ -652,6 +849,7 @@ export default function LobbyScreen() {
       onPressIn={setPressedJoinTableId}
       onPressOut={() => setPressedJoinTableId(null)}
       onJoinPress={handleJoinPress}
+      onShowDetails={() => setDetailsRow(item)}
       index={index}
       scrollY={scrollY}
     />
@@ -663,14 +861,18 @@ export default function LobbyScreen() {
 
   const EmptyComponent = useCallback(() => (
     <View style={styles.emptyState}>
-      <Text style={styles.emptyStateTitle}>NO TABLES</Text>
+      <Text style={styles.emptyStateTitle}>{searchQuery.trim() ? 'NO ROOMS FOUND' : 'NO TABLES'}</Text>
       <Text style={styles.emptyStateText}>
-        {activeTab === 'PRACTICE'
+        {searchQuery.trim()
+          ? `No rooms matching "${searchQuery.trim()}".\nTry a different Room ID.`
+          : activeTab === 'PRACTICE'
           ? 'Practice tables are loading…'
-          : joinableOnly ? 'No joinable tables found.\nTry turning off the filter.' : 'No tables available right now.'}
+          : activeTab === 'SEEKER'
+          ? (joinableOnly ? 'No joinable SEEKER tables.\nTry turning off the filter.' : 'No SEEKER tables available.')
+          : (joinableOnly ? 'No joinable tables found.\nTry turning off the filter.' : 'No tables available right now.')}
       </Text>
     </View>
-  ), [activeTab, joinableOnly]);
+  ), [activeTab, joinableOnly, searchQuery]);
 
   if (!fontsLoaded && !fontError) return null;
 
@@ -688,8 +890,10 @@ export default function LobbyScreen() {
           <Text style={styles.headerTitle}>TABLES</Text>
           {isWalletConnected ? (
             <View style={styles.walletBadge}>
-              <View style={[styles.walletDot, { backgroundColor: '#22c55e' }]} />
-              <Text style={[styles.walletStatusText, { color: '#22c55e' }]}>{solBalance ?? '…'}</Text>
+              <View style={[styles.walletDot, { backgroundColor: activeTab === 'SEEKER' ? '#B388FF' : '#22c55e' }]} />
+              <Text style={[styles.walletStatusText, { color: activeTab === 'SEEKER' ? '#B388FF' : '#22c55e' }]}>
+                {activeTab === 'SEEKER' ? (seekerBalance ?? '…') : (solBalance ?? '…')}
+              </Text>
             </View>
           ) : (
             <Pressable onPress={promptConnectWallet} style={[styles.walletBadge, styles.walletBadgeDisconnected, { flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }]}>
@@ -711,25 +915,58 @@ export default function LobbyScreen() {
             <Text style={styles.quickJoinArrow}>{'>'}</Text>
           </Pressable>
         )}
+        {activeTab === 'SEEKER' && (
+          <Pressable
+            style={({ pressed }) => [styles.quickJoinBtn, styles.quickJoinBtnSeeker, pressed && styles.quickJoinBtnPressed]}
+            onPress={handleQuickJoinSeeker}>
+            <View style={styles.quickJoinLeft}>
+              <Text style={[styles.quickJoinLabel, { color: '#BF5FFF' }]}>QUICK JOIN</Text>
+              <Text style={styles.quickJoinSub}>Best available table</Text>
+            </View>
+            <Text style={[styles.quickJoinArrow, { color: '#BF5FFF' }]}>{'>'}</Text>
+          </Pressable>
+        )}
 
         {/* Tabs */}
         <View style={styles.tabs}>
           <Pressable style={[styles.tab, activeTab === 'SOLANA' && styles.tabActive]} onPress={() => setActiveTab('SOLANA')}>
             <Text style={[styles.tabText, activeTab === 'SOLANA' && styles.tabTextActive]}>SOLANA</Text>
           </Pressable>
+          <Pressable style={[styles.tab, activeTab === 'SEEKER' && styles.tabActiveSeeker]} onPress={() => setActiveTab('SEEKER')}>
+            <Text style={[styles.tabText, activeTab === 'SEEKER' && styles.tabTextActiveSeeker]}>SEEKER</Text>
+          </Pressable>
           <Pressable style={[styles.tab, activeTab === 'PRACTICE' && styles.tabActivePractice]} onPress={() => setActiveTab('PRACTICE')}>
             <Text style={[styles.tabText, activeTab === 'PRACTICE' && styles.tabTextActivePractice]}>PRACTICE</Text>
           </Pressable>
         </View>
 
+        {/* Search bar */}
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>{'>'}</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by Room ID or name…"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} style={styles.searchClear}>
+              <Text style={styles.searchClearText}>X</Text>
+            </Pressable>
+          )}
+        </View>
+
         {/* Sort / filter bar — only for SOLANA */}
-        {activeTab === 'SOLANA' && (
+        {(activeTab === 'SOLANA' || activeTab === 'SEEKER') && (
           <FilterBar
             sort={sortBy}
             onSort={setSortBy}
             joinableOnly={joinableOnly}
             onToggleJoinable={() => setJoinableOnly((v) => !v)}
-            totalCount={solTables.length}
+            totalCount={activeTab === 'SEEKER' ? seekerTables.length : solTables.length}
             shownCount={displayTables.length}
           />
         )}
@@ -750,6 +987,16 @@ export default function LobbyScreen() {
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={5}
+        />
+
+        {/* Room details modal */}
+        <RoomDetailsModal
+          visible={!!detailsRow}
+          table={detailsRow?.t ?? null}
+          name={detailsRow?.name ?? ''}
+          tier={detailsRow?.tier ?? { label: 'LOW', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false }}
+          onClose={() => setDetailsRow(null)}
+          onJoin={handleJoinPress}
         />
 
         {/* Hidden create form */}
@@ -816,6 +1063,7 @@ const styles = StyleSheet.create({
     ...Platform.select({ ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8 }, android: { elevation: 6 }, default: {} }),
   },
   quickJoinBtnPressed: { opacity: 0.8 },
+  quickJoinBtnSeeker: { borderColor: '#BF5FFF', ...Platform.select({ ios: { shadowColor: '#BF5FFF' }, default: {} }) },
   quickJoinLeft: { gap: 5 },
   quickJoinLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 11 : 10, color: gold, letterSpacing: 1 },
   quickJoinSub: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.45)' },
@@ -831,9 +1079,11 @@ const styles = StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1, borderColor: gold, backgroundColor: panelBg, alignItems: 'center', justifyContent: 'center' },
   tabActive: { backgroundColor: gold, borderColor: darkGold },
   tabActivePractice: { backgroundColor: '#22c55e', borderColor: '#16a34a' },
+  tabActiveSeeker: { backgroundColor: '#BF5FFF', borderColor: '#9B30FF' },
   tabText: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: gold },
   tabTextActive: { color: '#1a0a2e' },
   tabTextActivePractice: { color: '#1a0a2e' },
+  tabTextActiveSeeker: { color: '#1a0a2e' },
 
   // Filter bar
   filterBarWrap: { marginBottom: 12, gap: 6 },
@@ -872,8 +1122,9 @@ const styles = StyleSheet.create({
     width: 200,
   },
   tableCardBody: { flex: 1, minWidth: 0, gap: 5 },
-  tableNameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2 },
-  tableName: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 12 : 10, color: gold, letterSpacing: 0.5 },
+  tableNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  tableName: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 12 : 10, color: gold, letterSpacing: 0.5, flexShrink: 1 },
+  copyIdBtn: { padding: 4 },
   tierBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 5 },
   tierBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, letterSpacing: 0.5 },
   tableBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 5 },
@@ -886,6 +1137,23 @@ const styles = StyleSheet.create({
   expandedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   expandedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.5)' },
   expandedValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.9)' },
+  detailsBtn: {
+    marginTop: 4, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 10,
+    borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,215,0,0.4)', backgroundColor: 'rgba(255,215,0,0.08)',
+  },
+  detailsBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 0.5 },
+
+  // Search bar
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: panelBg, borderRadius: 12, borderWidth: 1.5,
+    borderColor: 'rgba(255,215,0,0.35)', paddingHorizontal: 12, paddingVertical: 8,
+    marginBottom: 10, gap: 8,
+  },
+  searchIcon: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold, opacity: 0.6 },
+  searchInput: { flex: 1, fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#fff', paddingVertical: 4 },
+  searchClear: { paddingHorizontal: 6, paddingVertical: 4 },
+  searchClearText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.5)' },
 
   // JOIN button
   joinBtn: { minHeight: 44, minWidth: 88, borderRadius: 12, marginLeft: 12, overflow: 'hidden' },
@@ -949,4 +1217,38 @@ const ms = StyleSheet.create({
   confirmBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, letterSpacing: 1 },
   cancelBtn: { alignItems: 'center', paddingVertical: 8 },
   cancelBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: 'rgba(255,255,255,0.4)' },
+});
+
+// ─── Room details modal styles ───────────────────────────────────────────────
+
+const rdm = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  panel: {
+    width: '100%', maxWidth: 360,
+    backgroundColor: 'rgba(26,10,46,0.98)', borderRadius: 20, borderWidth: 2, padding: 24, gap: 12,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.7, shadowRadius: 24 }, android: { elevation: 24 }, default: {} }),
+  },
+  title: { fontFamily: 'PressStart2P_400Regular', fontSize: 13, textAlign: 'center', letterSpacing: 1 },
+  tierTag: { alignSelf: 'center', borderWidth: 1, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 14 },
+  tierTagText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, letterSpacing: 1 },
+  idRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)' },
+  idValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  idValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold, letterSpacing: 0.5 },
+  copyBadge: {
+    borderWidth: 1, borderColor: 'rgba(255,215,0,0.4)', borderRadius: 6,
+    paddingVertical: 3, paddingHorizontal: 8, backgroundColor: 'rgba(255,215,0,0.08)',
+  },
+  copyBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: gold },
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
+  label: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.45)', letterSpacing: 1 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  value: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.9)' },
+  joinBtn: {
+    paddingVertical: 14, borderRadius: 14, borderWidth: 2, alignItems: 'center',
+    backgroundColor: 'rgba(255,215,0,0.08)',
+    ...Platform.select({ ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 10 }, android: { elevation: 6 }, default: {} }),
+  },
+  joinBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, letterSpacing: 1 },
+  closeBtn: { alignItems: 'center', paddingVertical: 6 },
+  closeBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.4)' },
 });

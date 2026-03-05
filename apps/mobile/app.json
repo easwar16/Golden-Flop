@@ -11,7 +11,7 @@
     },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "goldenflop",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

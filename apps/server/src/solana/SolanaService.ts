@@ -304,6 +304,98 @@ export async function verifySPLDeposit(
   }
 }
 
+// ─── SPL token deposit verification (vault-specific) ─────────────────────────
+
+/**
+ * Verify that an SPL token transfer on-chain went to a specific vault's ATA.
+ * Modeled on verifySPLDeposit() but checks the vault's ATA instead of treasury ATA.
+ *
+ * @param txSignature    base58 transaction signature
+ * @param expectedAmount minimum token units expected
+ * @param senderAddress  base58 sender wallet
+ * @param vaultAddress   base58 vault public key (ATA is derived from vault + SEEKER_MINT)
+ */
+export async function verifySPLDepositToVault(
+  txSignature: string,
+  expectedAmount: bigint,
+  senderAddress: string,
+  vaultAddress: string,
+): Promise<DepositVerification> {
+  try {
+    const connection = getConnection();
+    const mint = getSeekerMint();
+
+    const tx = await connection.getParsedTransaction(txSignature, {
+      maxSupportedTransactionVersion: 0,
+      commitment: 'confirmed',
+    });
+
+    if (!tx) {
+      return { success: false, error: 'Transaction not found or not confirmed' };
+    }
+    if (tx.meta?.err) {
+      return { success: false, error: 'Transaction failed on-chain' };
+    }
+
+    // Derive the vault's ATA for the SEEKER mint
+    const { getAssociatedTokenAddress } = await import('@solana/spl-token');
+    const vaultPubkey = new PublicKey(vaultAddress);
+    const vaultATA = await getAssociatedTokenAddress(mint, vaultPubkey);
+    const vaultATAStr = vaultATA.toBase58();
+
+    const innerInstructions = tx.meta?.innerInstructions ?? [];
+    const allInstructions = [
+      ...tx.transaction.message.instructions,
+      ...innerInstructions.flatMap((ii) => ii.instructions),
+    ];
+
+    for (const ix of allInstructions) {
+      if (!('parsed' in ix)) continue;
+
+      const { type, info } = ix.parsed as {
+        type: string;
+        info: {
+          mint?: string;
+          authority?: string;
+          source?: string;
+          destination?: string;
+          tokenAmount?: { amount: string };
+          amount?: string;
+        };
+      };
+
+      if (type !== 'transferChecked' && type !== 'transfer') continue;
+
+      // Verify mint
+      if (info.mint && info.mint !== mint.toBase58()) continue;
+
+      // Verify sender authority
+      if (info.authority !== senderAddress) continue;
+
+      // Verify destination is vault's ATA
+      if (info.destination !== vaultATAStr) continue;
+
+      // Parse amount
+      const rawAmount = info.tokenAmount?.amount ?? info.amount ?? '0';
+      const transferred = BigInt(rawAmount);
+
+      if (transferred < expectedAmount) {
+        return {
+          success: false,
+          error: `Amount ${transferred} below expected ${expectedAmount}`,
+        };
+      }
+
+      return { success: true, confirmedAmount: transferred };
+    }
+
+    return { success: false, error: 'No matching SPL transfer to vault found in transaction' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Verification error: ${message}` };
+  }
+}
+
 /** Convenience: return treasury wallet address as base58 string. */
 export function getTreasuryAddress(): string {
   return getTreasuryPublicKey().toBase58();

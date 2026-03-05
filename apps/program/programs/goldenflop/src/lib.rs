@@ -1,255 +1,237 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 
-declare_id!("F1opGoldenFLop111111111111111111111111111");
+declare_id!("BNerVniNUJixgets2bKFtSbcpSFpCSjhapcNnJf4V35i");
 
 pub mod state;
-
 use state::*;
 
 #[program]
 pub mod goldenflop {
     use super::*;
 
-    /// Create a new poker table with blinds and stake limits.
-    pub fn create_table(
-        ctx: Context<CreateTable>,
-        small_blind: u64,
-        big_blind: u64,
-        min_buy_in: u64,
-        max_buy_in: u64,
-    ) -> Result<()> {
-        let table = &mut ctx.accounts.table;
-        table.creator = ctx.accounts.creator.key();
-        table.small_blind = small_blind;
-        table.big_blind = big_blind;
-        table.min_buy_in = min_buy_in;
-        table.max_buy_in = max_buy_in;
-        table.pot = 0;
-        table.state = TableState::WaitingForPlayers;
-        table.deck_seed = 0; // Placeholder; replace with VRF result (e.g. Switchboard)
-        table.bump = ctx.bumps.table;
-        table.player_count = 0;
+    /// Create a new game. The Game PDA doubles as the escrow pot.
+    /// Only the backend authority can create games.
+    pub fn create_game(ctx: Context<CreateGame>, game_id: u64) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        game.authority = ctx.accounts.authority.key();
+        game.game_id = game_id;
+        game.status = GameStatus::Open;
+        game.player_count = 0;
+        game.players = Default::default();
+        game.pot = 0;
+        game.result_hash = [0u8; 32];
+        game.winner = Pubkey::default();
+        game.settled_amount = 0;
+        game.bump = ctx.bumps.game;
+
+        msg!("Game {} created by {}", game_id, game.authority);
         Ok(())
     }
 
-    /// Join a table (buy-in). Requires main wallet signature.
-    pub fn join_table(ctx: Context<JoinTable>, buy_in_lamports: u64) -> Result<()> {
-        let table = &mut ctx.accounts.table;
-        require!(table.state == TableState::WaitingForPlayers || table.state == TableState::BetweenHands, GoldenflopError::InvalidTableState);
-        require!(table.player_count < MAX_PLAYERS, GoldenflopError::TableFull);
-        require!(buy_in_lamports >= table.min_buy_in && buy_in_lamports <= table.max_buy_in, GoldenflopError::InvalidBuyIn);
+    /// Player deposits SOL into the escrow pot (Game PDA).
+    /// Transfer goes directly from player wallet to the Game account.
+    pub fn join_game(ctx: Context<JoinGame>, amount: u64) -> Result<()> {
+        require!(amount > 0, GoldenflopError::InvalidDeposit);
 
-        let seat = table.player_count as usize;
-        table.players[seat] = Some(PlayerSlot {
-            authority: ctx.accounts.player.key(),
-            session_key: Pubkey::default(),
-            chips: buy_in_lamports,
-            in_hand: true,
-        });
-        table.player_count += 1;
-        Ok(())
-    }
+        {
+            let game = &ctx.accounts.game;
+            require!(game.status == GameStatus::Open, GoldenflopError::GameNotOpen);
+            require!(game.player_count < MAX_PLAYERS, GoldenflopError::GameFull);
 
-    /// Register a session key for in-game actions (signed by main wallet once).
-    pub fn create_session(
-        ctx: Context<CreateSession>,
-        ephemeral_signer: Pubkey,
-        expiry_ts: i64,
-    ) -> Result<()> {
-        let clock = Clock::get()?;
-        require!(expiry_ts > clock.unix_timestamp, GoldenflopError::SessionExpired);
-
-        let session = &mut ctx.accounts.session;
-        session.authority = ctx.accounts.authority.key();
-        session.ephemeral_signer = ephemeral_signer;
-        session.table = ctx.accounts.table.key();
-        session.created_at = clock.unix_timestamp;
-        session.expiry = expiry_ts;
-        session.bump = ctx.bumps.session;
-
-        let table = &mut ctx.accounts.table;
-        let player_index = table.find_player(ctx.accounts.authority.key())?;
-        table.players[player_index].as_mut().unwrap().session_key = ephemeral_signer;
-        Ok(())
-    }
-
-    /// In-game action (bet, fold, call, raise, all-in). Must be signed by session key.
-    pub fn action(ctx: Context<Action>, game_action: GameAction) -> Result<()> {
-        let session = &ctx.accounts.session;
-        let clock = Clock::get()?;
-        require!(clock.unix_timestamp < session.expiry, GoldenflopError::SessionExpired);
-        require!(ctx.accounts.signer.key() == session.ephemeral_signer, GoldenflopError::InvalidSigner);
-
-        let table = &mut ctx.accounts.table;
-        let player_index = table.find_player(session.authority)?;
-        let slot = table.players[player_index].as_mut().ok_or(GoldenflopError::PlayerNotFound)?;
-        require!(slot.in_hand, GoldenflopError::NotInHand);
-
-        match game_action {
-            GameAction::Fold => {
-                slot.in_hand = false;
-            }
-            GameAction::Call => {
-                // For simplicity: add current_bet - slot.bet_this_round to pot (would need current_bet on table)
-                table.pot += table.big_blind; // Placeholder
-            }
-            GameAction::Bet(amount) => {
-                require!(amount <= slot.chips, GoldenflopError::InsufficientChips);
-                slot.chips -= amount;
-                table.pot += amount;
-            }
-            GameAction::Raise(amount) => {
-                require!(amount <= slot.chips, GoldenflopError::InsufficientChips);
-                slot.chips -= amount;
-                table.pot += amount;
-            }
-            GameAction::AllIn => {
-                table.pot += slot.chips;
-                slot.chips = 0;
+            // Check player hasn't already deposited
+            let player_key = ctx.accounts.player.key();
+            for slot in game.players.iter().flatten() {
+                require!(slot.wallet != player_key, GoldenflopError::AlreadyJoined);
             }
         }
+
+        // Transfer SOL from player to Game PDA (escrow)
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.player.to_account_info(),
+                    to: ctx.accounts.game.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        // Record deposit
+        let game = &mut ctx.accounts.game;
+        let player_key = ctx.accounts.player.key();
+        let seat = game.player_count as usize;
+        game.players[seat] = Some(PlayerDeposit {
+            wallet: player_key,
+            amount,
+        });
+        game.player_count += 1;
+        game.pot = game.pot.checked_add(amount).ok_or(GoldenflopError::Overflow)?;
+
+        msg!(
+            "Player {} deposited {} lamports (seat {}). Pot: {}",
+            player_key, amount, seat, game.pot
+        );
         Ok(())
     }
 
-    /// Leave table and settle. Requires main wallet.
-    pub fn leave_table(ctx: Context<LeaveTable>) -> Result<()> {
-        let table = &mut ctx.accounts.table;
-        let player_index = table.find_player(ctx.accounts.player.key())?;
-        table.players[player_index] = None;
-        table.compact_players()?;
+    /// Backend commits the SHA-256 hash of the game result and declares the winner.
+    /// Only the authority can call this. Must be called before settle_pot.
+    pub fn commit_result_hash(
+        ctx: Context<CommitResultHash>,
+        result_hash: [u8; 32],
+        winner: Pubkey,
+    ) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        require!(game.status == GameStatus::Open, GoldenflopError::GameNotOpen);
+        require!(result_hash != [0u8; 32], GoldenflopError::InvalidHash);
+
+        // Verify winner is actually a player in this game
+        let is_player = game.players.iter().flatten().any(|p| p.wallet == winner);
+        require!(is_player, GoldenflopError::WinnerNotInGame);
+
+        game.result_hash = result_hash;
+        game.winner = winner;
+        game.status = GameStatus::Committed;
+
+        msg!(
+            "Game {} result committed. Winner: {}. Hash: {:?}",
+            game.game_id, winner, &result_hash[..8]
+        );
         Ok(())
     }
 
-    /// Revoke a session key.
-    pub fn revoke_session(ctx: Context<RevokeSession>) -> Result<()> {
-        let session = &ctx.accounts.session;
-        require!(ctx.accounts.authority.key() == session.authority, GoldenflopError::InvalidSigner);
+    /// Settle the pot: transfer all escrowed SOL from Game PDA to winner.
+    /// Only the authority can call this. Can only settle once.
+    pub fn settle_pot(ctx: Context<SettlePot>) -> Result<()> {
+        let pot_amount;
+        {
+            let game = &ctx.accounts.game;
+            require!(game.status == GameStatus::Committed, GoldenflopError::NotCommitted);
+            require!(game.winner == ctx.accounts.winner.key(), GoldenflopError::WinnerMismatch);
+            pot_amount = game.pot;
+            require!(pot_amount > 0, GoldenflopError::EmptyPot);
+        }
+
+        // Transfer lamports from Game PDA to winner.
+        // PDA-owned accounts can transfer lamports by directly mutating lamport balances.
+        let game_info = ctx.accounts.game.to_account_info();
+        let winner_info = ctx.accounts.winner.to_account_info();
+
+        **game_info.try_borrow_mut_lamports()? = game_info
+            .lamports()
+            .checked_sub(pot_amount)
+            .ok_or(GoldenflopError::Overflow)?;
+        **winner_info.try_borrow_mut_lamports()? = winner_info
+            .lamports()
+            .checked_add(pot_amount)
+            .ok_or(GoldenflopError::Overflow)?;
+
+        let game = &mut ctx.accounts.game;
+        game.settled_amount = pot_amount;
+        game.pot = 0;
+        game.status = GameStatus::Settled;
+
+        msg!(
+            "Game {} settled. {} lamports -> {}",
+            game.game_id, pot_amount, ctx.accounts.winner.key()
+        );
         Ok(())
     }
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
-pub enum GameAction {
-    Fold,
-    Call,
-    Bet(u64),
-    Raise(u64),
-    AllIn,
-}
+// ─── Account contexts ───────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-pub struct CreateTable<'info> {
+#[instruction(game_id: u64)]
+pub struct CreateGame<'info> {
     #[account(mut)]
-    pub creator: Signer<'info>,
-
-    #[account(
-        init,
-        payer = creator,
-        space = Table::LEN,
-        seeds = [b"table", creator.key().as_ref()],
-        bump
-    )]
-    pub table: Account<'info, Table>,
-
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct JoinTable<'info> {
-    #[account(mut)]
-    pub player: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [b"table", table.creator.as_ref()],
-        bump = table.bump,
-    )]
-    pub table: Account<'info, Table>,
-}
-
-#[derive(Accounts)]
-pub struct CreateSession<'info> {
     pub authority: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [b"table", table.creator.as_ref()],
-        bump = table.bump,
-    )]
-    pub table: Account<'info, Table>,
 
     #[account(
         init,
         payer = authority,
-        space = Session::LEN,
-        seeds = [b"session", authority.key().as_ref(), table.key().as_ref()],
-        bump
+        space = Game::LEN,
+        seeds = [b"game", authority.key().as_ref(), &game_id.to_le_bytes()],
+        bump,
     )]
-    pub session: Account<'info, Session>,
+    pub game: Account<'info, Game>,
 
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct Action<'info> {
-    pub signer: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [b"table", table.creator.as_ref()],
-        bump = table.bump,
-    )]
-    pub table: Account<'info, Table>,
-
-    #[account(
-        seeds = [b"session", session.authority.as_ref(), table.key().as_ref()],
-        bump = session.bump,
-    )]
-    pub session: Account<'info, Session>,
-}
-
-#[derive(Accounts)]
-pub struct LeaveTable<'info> {
+pub struct JoinGame<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"table", table.creator.as_ref()],
-        bump = table.bump,
+        seeds = [b"game", game.authority.as_ref(), &game.game_id.to_le_bytes()],
+        bump = game.bump,
     )]
-    pub table: Account<'info, Table>,
+    pub game: Account<'info, Game>,
+
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct RevokeSession<'info> {
+pub struct CommitResultHash<'info> {
+    /// The backend authority — must match game.authority
     pub authority: Signer<'info>,
 
     #[account(
         mut,
-        close = authority,
-        seeds = [b"session", session.authority.as_ref(), session.table.as_ref()],
-        bump = session.bump,
+        has_one = authority @ GoldenflopError::Unauthorized,
+        seeds = [b"game", game.authority.as_ref(), &game.game_id.to_le_bytes()],
+        bump = game.bump,
     )]
-    pub session: Account<'info, Session>,
+    pub game: Account<'info, Game>,
 }
+
+#[derive(Accounts)]
+pub struct SettlePot<'info> {
+    /// The backend authority — must match game.authority
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        has_one = authority @ GoldenflopError::Unauthorized,
+        seeds = [b"game", game.authority.as_ref(), &game.game_id.to_le_bytes()],
+        bump = game.bump,
+    )]
+    pub game: Account<'info, Game>,
+
+    /// CHECK: Validated against game.winner in the instruction logic.
+    #[account(mut)]
+    pub winner: AccountInfo<'info>,
+}
+
+// ─── Errors ─────────────────────────────────────────────────────────────────
 
 #[error_code]
 pub enum GoldenflopError {
-    #[msg("Invalid table state for this action")]
-    InvalidTableState,
-    #[msg("Table is full")]
-    TableFull,
-    #[msg("Buy-in out of range")]
-    InvalidBuyIn,
-    #[msg("Session expired")]
-    SessionExpired,
-    #[msg("Signer is not the session key")]
-    InvalidSigner,
-    #[msg("Player not found at table")]
-    PlayerNotFound,
-    #[msg("Player not in current hand")]
-    NotInHand,
-    #[msg("Insufficient chips")]
-    InsufficientChips,
+    #[msg("Game is not open for deposits")]
+    GameNotOpen,
+    #[msg("Game is full")]
+    GameFull,
+    #[msg("Invalid deposit amount")]
+    InvalidDeposit,
+    #[msg("Player already joined this game")]
+    AlreadyJoined,
+    #[msg("Result not yet committed")]
+    NotCommitted,
+    #[msg("Invalid result hash")]
+    InvalidHash,
+    #[msg("Winner is not a player in this game")]
+    WinnerNotInGame,
+    #[msg("Winner pubkey does not match committed winner")]
+    WinnerMismatch,
+    #[msg("Pot is empty")]
+    EmptyPot,
+    #[msg("Unauthorized — signer is not the game authority")]
+    Unauthorized,
+    #[msg("Arithmetic overflow")]
+    Overflow,
 }

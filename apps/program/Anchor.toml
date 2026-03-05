@@ -3,10 +3,10 @@ seeds = true
 skip_lint = false
 
 [programs.localnet]
-goldenflop = "F1opGoldenFLop111111111111111111111111111"
+goldenflop = "BNerVniNUJixgets2bKFtSbcpSFpCSjhapcNnJf4V35i"
 
 [programs.devnet]
-goldenflop = "F1opGoldenFLop111111111111111111111111111"
+goldenflop = "BNerVniNUJixgets2bKFtSbcpSFpCSjhapcNnJf4V35i"
 
 [registry]
 url = "https://api.apr.dev"

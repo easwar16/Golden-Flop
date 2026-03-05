@@ -22,9 +22,9 @@ import type {
 import { RoomManager } from '../room/RoomManager';
 import { TableRegistry } from '../table/TableRegistry';
 import { extractSocketUser } from '../auth/jwtMiddleware';
-import { processBuyIn } from '../balance/BalanceService';
+import { processBuyIn, processCashOut } from '../balance/BalanceService';
 import { settlePlayerBalance } from '../balance/settlePlayerBalance';
-import { verifySOLDepositToVault } from '../solana/SolanaService';
+import { verifySOLDepositToVault, verifySPLDepositToVault } from '../solana/SolanaService';
 import { prisma } from '../db/prisma';
 import { findOrCreateUser } from '../services/user.service';
 
@@ -130,8 +130,9 @@ export function registerSocketHandlers(
 
         // ── Balance check for authenticated users ──────────────────────────
         // Guests (no JWT) bypass the check — they use in-memory chips only.
+        const roomTokenType = room.tokenType;
         if (userId) {
-          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn));
+          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn), roomTokenType);
           if (!buyInResult.success) {
             ack?.(buyInResult.error ?? 'Insufficient balance');
             return;
@@ -141,7 +142,7 @@ export function registerSocketHandlers(
         const err = room.join(socket, playerId, playerName, avatarSeed, payload.buyIn, undefined, { userId });
         if (err) {
           // Refund the deducted balance if join itself fails
-          if (userId) await processCashOut(userId, BigInt(payload.buyIn));
+          if (userId) await processCashOut(userId, BigInt(payload.buyIn), roomTokenType);
           ack?.(err);
           return;
         }
@@ -222,7 +223,7 @@ export function registerSocketHandlers(
           // ── Vault flow: verify on-chain deposit to room vault ─────────
           const dbRoom = await prisma.room.findUnique({
             where: { id: payload.tableId },
-            select: { vaultAddress: true },
+            select: { vaultAddress: true, tokenType: true },
           });
 
           if (!dbRoom?.vaultAddress) {
@@ -230,6 +231,7 @@ export function registerSocketHandlers(
             return;
           }
 
+          const roomTokenType = (dbRoom.tokenType as 'SOL' | 'SEEKER') ?? 'SOL';
           walletAddress = payloadWallet;
 
           // Resolve user by wallet address (create if first time)
@@ -247,13 +249,25 @@ export function registerSocketHandlers(
             }
             // Already processed — allow re-seating with this deposit
           } else {
-            // Verify on-chain
-            const verification = await verifySOLDepositToVault(
-              txSignature,
-              BigInt(payload.buyIn),
-              walletAddress,
-              dbRoom.vaultAddress,
-            );
+            // Verify on-chain — branch by token type
+            // SEEKER amounts in payload are whole tokens; on-chain uses smallest units (9 decimals)
+            const expectedOnChain = roomTokenType === 'SEEKER'
+              ? BigInt(payload.buyIn) * 1_000_000_000n
+              : BigInt(payload.buyIn);
+
+            const verification = roomTokenType === 'SEEKER'
+              ? await verifySPLDepositToVault(
+                  txSignature,
+                  expectedOnChain,
+                  walletAddress,
+                  dbRoom.vaultAddress,
+                )
+              : await verifySOLDepositToVault(
+                  txSignature,
+                  expectedOnChain,
+                  walletAddress,
+                  dbRoom.vaultAddress,
+                );
 
             if (!verification.success) {
               ack?.({ error: verification.error ?? 'On-chain verification failed' });
@@ -264,7 +278,7 @@ export function registerSocketHandlers(
             await prisma.deposit.create({
               data: {
                 userId: vaultUserId,
-                tokenType: 'SOL',
+                tokenType: roomTokenType,
                 amount: verification.confirmedAmount!,
                 transactionSignature: txSignature,
                 status: 'CONFIRMED',
@@ -275,7 +289,7 @@ export function registerSocketHandlers(
           isVaultPlayer = true;
         } else if (userId) {
           // ── Internal balance flow (existing) ──────────────────────────
-          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn));
+          const buyInResult = await processBuyIn(userId, payload.tableId, BigInt(payload.buyIn), room.tokenType);
           if (!buyInResult.success) {
             ack?.({ error: buyInResult.error ?? 'Insufficient balance' });
             return;
@@ -298,7 +312,7 @@ export function registerSocketHandlers(
         );
         if (err) {
           // Refund internal balance if join fails (vault deposits are already on-chain)
-          if (userId && !isVaultPlayer) await processCashOut(userId, BigInt(payload.buyIn));
+          if (userId && !isVaultPlayer) await processCashOut(userId, BigInt(payload.buyIn), room.tokenType);
           ack?.({ error: err });
           return;
         }
@@ -329,6 +343,7 @@ export function registerSocketHandlers(
       const seatUserId = seat?.userId ?? null;
       const seatIsVault = seat?.isVaultPlayer ?? false;
       const isPractice = room.config.isPractice ?? false;
+      const leaveTokenType = room.tokenType;
 
       // Remove player from the room immediately — don't block on payout
       room.leave(socket.id);
@@ -339,7 +354,7 @@ export function registerSocketHandlers(
 
       // Process payout via shared settlement service
       const { txSignature } = await settlePlayerBalance(
-        { userId: seatUserId, walletAddress: seatWallet, isVaultPlayer: seatIsVault, chips: cashOutAmount },
+        { userId: seatUserId, walletAddress: seatWallet, isVaultPlayer: seatIsVault, chips: cashOutAmount, tokenType: leaveTokenType },
         payload.tableId,
         isPractice,
       );

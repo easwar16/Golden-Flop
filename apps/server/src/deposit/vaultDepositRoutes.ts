@@ -11,7 +11,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma';
 import { requireAuth, type AuthRequest } from '../auth/jwtMiddleware';
-import { verifySOLDepositToVault } from '../solana/SolanaService';
+import { verifySOLDepositToVault, verifySPLDepositToVault } from '../solana/SolanaService';
 import { creditBalance } from '../balance/BalanceService';
 import { generalLimiter } from '../middleware/rateLimiter';
 
@@ -43,6 +43,7 @@ router.get('/:roomId/address', async (req: Request, res: Response) => {
       vault: room.vaultAddress,
       network: process.env.SOLANA_NETWORK ?? 'devnet',
       tokenType: room.tokenType,
+      seekerMint: process.env.SEEKER_MINT ?? null,
     });
   } catch (err) {
     console.error('[vaultDepositRoutes] Error fetching vault address:', err);
@@ -65,8 +66,6 @@ router.post('/:roomId/verify-buy-in', requireAuth, async (req: Request, res: Res
     return;
   }
 
-  const expectedAmount = BigInt(expectedAmountLamports);
-
   // ── Look up room + vault ──────────────────────────────────────────────────
   const room = await prisma.room.findUnique({
     where: { id: roomId },
@@ -77,6 +76,14 @@ router.post('/:roomId/verify-buy-in', requireAuth, async (req: Request, res: Res
     res.status(404).json({ error: 'Room vault not configured' });
     return;
   }
+
+  const roomTokenType = (room.tokenType as 'SOL' | 'SEEKER') ?? 'SOL';
+
+  // SEEKER amounts may arrive as whole tokens; on-chain uses smallest units (9 decimals)
+  const rawAmount = BigInt(expectedAmountLamports);
+  const expectedAmount = roomTokenType === 'SEEKER'
+    ? rawAmount * 1_000_000_000n
+    : rawAmount;
 
   // ── Idempotency check ─────────────────────────────────────────────────────
   const existing = await prisma.deposit.findUnique({
@@ -106,12 +113,19 @@ router.post('/:roomId/verify-buy-in', requireAuth, async (req: Request, res: Res
   });
 
   // ── Verify on-chain transfer to vault ─────────────────────────────────────
-  const result = await verifySOLDepositToVault(
-    transactionSignature,
-    expectedAmount,
-    walletAddress,
-    room.vaultAddress,
-  );
+  const result = roomTokenType === 'SEEKER'
+    ? await verifySPLDepositToVault(
+        transactionSignature,
+        expectedAmount,
+        walletAddress,
+        room.vaultAddress,
+      )
+    : await verifySOLDepositToVault(
+        transactionSignature,
+        expectedAmount,
+        walletAddress,
+        room.vaultAddress,
+      );
 
   if (!result.success) {
     await prisma.deposit.update({
