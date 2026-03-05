@@ -1,0 +1,1 @@
+/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/sbpf-solana-solana/release/goldenflop.so: /Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/programs/goldenflop/src/lib.rs /Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/programs/goldenflop/src/state.rs

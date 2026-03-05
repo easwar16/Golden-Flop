@@ -125,6 +125,9 @@ export interface TableStatePayload {
   minBuyIn: number;
   maxBuyIn: number;
 
+  /** Token type for this table */
+  tokenType?: 'SOL' | 'SEEKER';
+
   /** Server's Date.now() when this payload was built – used to correct client clock skew */
   serverTime: number;
 }
@@ -157,6 +160,8 @@ export interface TableInfo {
   occupiedSeats: number[];
   /** Which seat indices are reserved (pre-wallet-tx lock) */
   reservedSeats: number[];
+  /** Token type for this table */
+  tokenType?: 'SOL' | 'SEEKER';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

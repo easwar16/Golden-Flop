@@ -1,0 +1,14 @@
+/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/deps/serde-4304f5b0cf12022e.d: /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/build/serde-bb2d61c666ce74f7/out/private.rs
+
+/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/deps/libserde-4304f5b0cf12022e.rlib: /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/build/serde-bb2d61c666ce74f7/out/private.rs
+
+/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/deps/libserde-4304f5b0cf12022e.rmeta: /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/build/serde-bb2d61c666ce74f7/out/private.rs
+
+/Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/easwar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/build/serde-bb2d61c666ce74f7/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/easwar/Developer/GoldenFlop/GoldenFlop/apps/program/target/debug/build/serde-bb2d61c666ce74f7/out
