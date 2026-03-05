@@ -42,15 +42,26 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ReAnimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSequence,
+  runOnJS,
+  Easing as REasing,
+} from 'react-native-reanimated';
 
-import { PokerCard } from '@/components/poker/poker-card';
+import * as Clipboard from 'expo-clipboard';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { PokerCard, type CardMagnifyInfo } from '@/components/poker/poker-card';
 import { GameActionButtons } from '@/components/poker/GameActionButtons';
 import PixelAvatar from '@/components/PixelAvatar';
 import DealingCards from '@/components/animations/DealingCards';
 import type { CardValue } from '@/constants/poker';
 import { SocketService } from '@/services/SocketService';
 import { useWallet } from '@/contexts/wallet-context';
-import { buildVaultBuyInTransaction } from '@/services/DepositService';
+import { buildVaultBuyInTransaction, buildSPLVaultBuyInTransaction } from '@/services/DepositService';
 import { SOLANA_NETWORK } from '@/constants/solana';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useGameStore } from '@/stores/useGameStore';
@@ -68,8 +79,8 @@ const gold = '#FFD700';
 function formatSol(lamports: number): string {
   const sol = lamports / 1_000_000_000;
   if (sol === 0) return '0 ◎';
-  // Show up to 9 decimals (lamport precision), strip trailing zeros
-  const str = sol.toFixed(9).replace(/\.?0+$/, '');
+  // Show up to 4 decimals, strip trailing zeros
+  const str = sol.toFixed(4).replace(/\.?0+$/, '');
   return `${str} ◎`;
 }
 
@@ -79,9 +90,18 @@ function formatChips(chips: number): string {
   return `${Math.round(chips)}`;
 }
 
-/** Returns the right formatter based on whether the table uses practice chips or SOL. */
-function getFormatter(isPractice: boolean): (value: number) => string {
-  return isPractice ? formatChips : formatSol;
+function formatSeekerValue(amount: number): string {
+  if (amount === 0) return '0 SK';
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M SK`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K SK`;
+  return `${amount} SK`;
+}
+
+/** Returns the right formatter based on whether the table uses practice chips, SEEKER, or SOL. */
+function getFormatter(isPractice: boolean, isSeeker: boolean = false): (value: number) => string {
+  if (isPractice) return formatChips;
+  if (isSeeker) return formatSeekerValue;
+  return formatSol;
 }
 
 // Seat positions are computed dynamically in the component from screen dimensions.
@@ -234,19 +254,31 @@ const SeatSlot = memo(function SeatSlot({
 
       {/* Player info strip below avatar */}
       {seat ? (
-        <View style={slotStyles.info}>
-          <Text style={slotStyles.name} numberOfLines={1}>{displayName}</Text>
-          <Text style={slotStyles.chips}>{formatValue(seat.chips)}</Text>
-          {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
-          {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
-          {seat.isSittingOut && !seat.isFolded && <Text style={slotStyles.sitOutLabel}>SIT OUT</Text>}
+        <View style={[
+          slotStyles.info,
+          seatIndex === 1 || seatIndex === 3 ? slotStyles.infoLeft : undefined,
+          seatIndex === 2 || seatIndex === 4 ? slotStyles.infoRight : undefined,
+        ]}>
+          <View style={slotStyles.infoPill}>
+            <Text style={slotStyles.name} numberOfLines={1}>{displayName}</Text>
+            <Text style={slotStyles.chips} numberOfLines={1}>{formatValue(seat.chips)}</Text>
+            {seat.isAllIn && <Text style={slotStyles.allIn}>ALL IN</Text>}
+            {seat.isFolded && <Text style={slotStyles.foldedLabel}>FOLD</Text>}
+            {seat.isSittingOut && !seat.isFolded && <Text style={slotStyles.sitOutLabel}>SIT OUT</Text>}
+          </View>
           {seat.currentBet > 0 && !seat.isFolded && (
             <Text style={slotStyles.betLabel}>{seat.isAllIn ? 'ALL IN' : formatValue(seat.currentBet)}</Text>
           )}
         </View>
       ) : reservation ? (
-        <View style={slotStyles.info}>
-          <Text style={[slotStyles.name, { opacity: 0.5 }]} numberOfLines={1}>{reservation.playerName}</Text>
+        <View style={[
+          slotStyles.info,
+          seatIndex === 1 || seatIndex === 3 ? slotStyles.infoLeft : undefined,
+          seatIndex === 2 || seatIndex === 4 ? slotStyles.infoRight : undefined,
+        ]}>
+          <View style={slotStyles.infoPill}>
+            <Text style={[slotStyles.name, { opacity: 0.5 }]} numberOfLines={1}>{reservation.playerName}</Text>
+          </View>
         </View>
       ) : null}
     </Pressable>
@@ -304,25 +336,40 @@ const slotStyles = StyleSheet.create({
   },
   joinBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 12, color: gold, lineHeight: 14 },
   info: {
-    position: 'absolute', bottom: -42,
-    left: -12, right: -12, alignItems: 'center', gap: 2,
+    position: 'absolute', bottom: -46,
+    left: -24, right: -24,
+    alignItems: 'center', gap: 2,
+  },
+  infoPill: {
+    backgroundColor: 'rgba(10,4,20,0.75)',
+    borderRadius: 8,
+    paddingVertical: 3, paddingHorizontal: 6,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center', gap: 1,
+  },
+  infoLeft: {
+    left: -10, right: -50, alignItems: 'center',
+  },
+  infoRight: {
+    right: -10, left: -50, alignItems: 'center',
   },
   name: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#FFF8E8',
-    marginTop: 0,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#FFF8E8',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
-    maxWidth: 96, textAlign: 'center',
+    textAlign: 'center',
   },
   chips: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FF88',
+    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#00FF88',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+    textAlign: 'center',
   },
   allIn: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FF6B6B' },
   foldedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.4)' },
   sitOutLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: '#FF9944' },
   betLabel: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#FFE066',
+    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FFE066',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+    textAlign: 'center',
   },
 });
 
@@ -428,6 +475,7 @@ interface BuyInModalProps {
   visible: boolean;
   seatIndex: number;
   isPractice?: boolean;
+  tokenType?: 'SOL' | 'SEEKER';
   tableId: string;
   minBuyIn: number;
   maxBuyIn: number;
@@ -439,10 +487,11 @@ function lamportsToSol(lamports: number): string {
 }
 
 const BuyInModal = memo(function BuyInModal({
-  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose, isPractice,
+  visible, seatIndex, tableId, minBuyIn, maxBuyIn, onClose, isPractice, tokenType,
 }: BuyInModalProps) {
-  // Input is in SOL (e.g. "0.05"), converted to lamports on confirm
-  const [amount, setAmount] = useState(lamportsToSol(minBuyIn));
+  const isSeeker = tokenType === 'SEEKER';
+  // Input is in SOL (e.g. "0.05") or SEEKER units, converted to smallest unit on confirm
+  const [amount, setAmount] = useState(isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
   const avatarSeed = useUserStore((s) => s.avatarSeed);
   const username = useUserStore((s) => s.username);
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
@@ -452,13 +501,13 @@ const BuyInModal = memo(function BuyInModal({
 
   const { accounts, signAndSendTransaction, deauthorize } = useWallet();
 
-  // Reset to min SOL whenever the modal opens for a new seat
+  // Reset to min whenever the modal opens for a new seat
   useEffect(() => {
     if (visible) {
-      setAmount(lamportsToSol(minBuyIn));
+      setAmount(isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
       hasReservationRef.current = false;
     }
-  }, [visible, minBuyIn]);
+  }, [visible, minBuyIn, isSeeker]);
 
   // Close the modal — reservation stays active and expires via server timeout
   const handleClose = useCallback(() => {
@@ -468,10 +517,10 @@ const BuyInModal = memo(function BuyInModal({
 
   const handleConfirm = useCallback(async () => {
     let buyIn: number;
-    if (isPractice) {
+    if (isPractice || isSeeker) {
       buyIn = parseInt(amount, 10);
       if (isNaN(buyIn) || buyIn <= 0) {
-        setAlert({ title: 'INVALID AMOUNT', message: 'Enter a valid chip amount' });
+        setAlert({ title: 'INVALID AMOUNT', message: isSeeker ? 'Enter a valid SEEKER amount' : 'Enter a valid chip amount' });
         return;
       }
     } else {
@@ -485,12 +534,16 @@ const BuyInModal = memo(function BuyInModal({
     if (buyIn < minBuyIn) {
       setAlert({ title: 'INVALID AMOUNT', message: isPractice
         ? `Minimum buy-in is ${minBuyIn.toLocaleString()} chips`
+        : isSeeker
+        ? `Minimum buy-in is ${minBuyIn.toLocaleString()} SEEKER`
         : `Minimum buy-in is ${lamportsToSol(minBuyIn)} SOL` });
       return;
     }
     if (buyIn > maxBuyIn) {
       setAlert({ title: 'INVALID AMOUNT', message: isPractice
         ? `Maximum buy-in is ${maxBuyIn.toLocaleString()} chips`
+        : isSeeker
+        ? `Maximum buy-in is ${maxBuyIn.toLocaleString()} SEEKER`
         : `Maximum buy-in is ${lamportsToSol(maxBuyIn)} SOL` });
       return;
     }
@@ -528,7 +581,9 @@ const BuyInModal = memo(function BuyInModal({
 
       // 2. Build and sign the wallet transaction
       const walletAddress = new PublicKey(accounts[0].address).toBase58();
-      const tx = await buildVaultBuyInTransaction(walletAddress, buyIn, tableId, SOLANA_NETWORK);
+      const tx = isSeeker
+        ? await buildSPLVaultBuyInTransaction(walletAddress, BigInt(buyIn) * 1_000_000_000n, tableId, 9, SOLANA_NETWORK)
+        : await buildVaultBuyInTransaction(walletAddress, buyIn, tableId, SOLANA_NETWORK);
       const txSignature = await signAndSendTransaction(tx);
       // Reservation will be consumed by sit_at_seat — don't release on close
       hasReservationRef.current = false;
@@ -552,7 +607,7 @@ const BuyInModal = memo(function BuyInModal({
       } else if (raw.includes('declined') || raw.includes('rejected') || raw.includes('cancelled')) {
         message = 'Transaction was cancelled.';
       } else if (raw.includes('insufficient') || raw.includes('Insufficient')) {
-        message = 'Insufficient SOL balance for this buy-in.';
+        message = isSeeker ? 'Insufficient SEEKER balance for this buy-in.' : 'Insufficient SOL balance for this buy-in.';
       } else if (raw.includes('timeout') || raw.includes('Timeout')) {
         message = 'Wallet request timed out. Please try again.';
       }
@@ -560,7 +615,7 @@ const BuyInModal = memo(function BuyInModal({
     } finally {
       setSending(false);
     }
-  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose, accounts, signAndSendTransaction]);
+  }, [amount, tableId, seatIndex, minBuyIn, maxBuyIn, onClose, accounts, signAndSendTransaction, isPractice, isSeeker]);
 
   return (
     <>
@@ -574,6 +629,8 @@ const BuyInModal = memo(function BuyInModal({
                 <Text style={bimStyles.range}>
                   {isPractice
                     ? `${minBuyIn.toLocaleString()} – ${maxBuyIn.toLocaleString()} chips`
+                    : isSeeker
+                    ? `${minBuyIn.toLocaleString()} – ${maxBuyIn.toLocaleString()} SEEKER`
                     : `${lamportsToSol(minBuyIn)} – ${lamportsToSol(maxBuyIn)} SOL`}
                 </Text>
                 <TextInput
@@ -729,7 +786,12 @@ const woStyles = StyleSheet.create({
 // Chip sweep animation — coins fly from pot center to winner's seat
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CHIP_COUNT = 10;
+const COIN_IMG = require('@/assets/images/coin.png');
+const SWEEP_COIN_COUNT = 8;
+const SWEEP_COIN_SIZE = 26;
+const SWEEP_DURATION = 550;
+const SWEEP_STAGGER = 80;
+const sweepEase = REasing.bezier(0.33, 1, 0.68, 1);
 
 interface ChipSweepProps {
   origin: { x: number; y: number };
@@ -742,188 +804,230 @@ interface ChipSweepProps {
   formatValue: (v: number) => string;
 }
 
-const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, winnerName, bestHandCards, onComplete, formatValue }: ChipSweepProps) {
-  const chips = useRef(
-    Array.from({ length: CHIP_COUNT }, () => ({
-      x: new Animated.Value(origin.x),
-      y: new Animated.Value(origin.y),
-      opacity: new Animated.Value(0),
-      scale: new Animated.Value(0.2),
+/** Single animated coin — uses react-native-reanimated shared values. */
+function SweepCoin({ fromX, fromY, dx, dy, delay }: {
+  fromX: number; fromY: number; dx: number; dy: number; delay: number;
+}) {
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const op = useSharedValue(0);
+  const sc = useSharedValue(0.3);
+
+  useEffect(() => {
+    const cfg = { duration: SWEEP_DURATION, easing: sweepEase };
+    op.value = withDelay(delay, withSequence(
+      withTiming(1, { duration: 60 }),
+      withTiming(1, { duration: SWEEP_DURATION - 160 }),
+      withTiming(0, { duration: 200 }),
+    ));
+    tx.value = withDelay(delay, withTiming(dx, cfg));
+    ty.value = withDelay(delay, withTiming(dy, cfg));
+    sc.value = withDelay(delay, withSequence(
+      withTiming(1.15, { duration: SWEEP_DURATION * 0.4, easing: sweepEase }),
+      withTiming(0.5, { duration: SWEEP_DURATION * 0.6, easing: sweepEase }),
+    ));
+  }, []);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: op.value,
+    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: sc.value }],
+  }));
+
+  return (
+    <ReAnimated.View style={[{
+      position: 'absolute',
+      left: fromX,
+      top: fromY,
+      width: SWEEP_COIN_SIZE,
+      height: SWEEP_COIN_SIZE,
+      zIndex: 100,
+    }, style]} pointerEvents="none">
+      <Image source={COIN_IMG} style={{ width: SWEEP_COIN_SIZE, height: SWEEP_COIN_SIZE }} />
+    </ReAnimated.View>
+  );
+}
+
+/** Animated text label — uses reanimated. */
+function SweepLabel({ x, y, text, color, fontSize, delay, holdMs, onDone }: {
+  x: number; y: number; text: string; color: string; fontSize: number;
+  delay: number; holdMs: number; onDone?: () => void;
+}) {
+  const op = useSharedValue(0);
+  const sc = useSharedValue(0.5);
+
+  useEffect(() => {
+    op.value = withDelay(delay, withSequence(
+      withTiming(1, { duration: 200 }),
+      withTiming(1, { duration: holdMs }),
+      withTiming(0, { duration: 300 }),
+    ));
+    sc.value = withDelay(delay, withSequence(
+      withTiming(1, { duration: 250, easing: sweepEase }),
+      withTiming(1, { duration: holdMs }),
+      withTiming(1.15, { duration: 300 }),
+    ));
+    if (onDone) {
+      const t = setTimeout(onDone, delay + 200 + holdMs + 300 + 100);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: op.value,
+    transform: [{ scale: sc.value }],
+  }));
+
+  return (
+    <ReAnimated.Text style={[{
+      position: 'absolute',
+      left: x - 110, top: y, width: 220,
+      textAlign: 'center',
+      fontFamily: 'PressStart2P_400Regular',
+      fontSize,
+      color,
+      textShadowColor: 'rgba(0,0,0,0.9)',
+      textShadowOffset: { width: 0, height: 2 },
+      textShadowRadius: 6,
+      zIndex: 100,
+    }, style]} pointerEvents="none">
+      {text}
+    </ReAnimated.Text>
+  );
+}
+
+const ChipSweep = memo(function ChipSweep({ origin, target, winAmount, handName, onComplete, formatValue }: ChipSweepProps) {
+  // Pre-compute random offsets once
+  const offsets = useRef(
+    Array.from({ length: SWEEP_COIN_COUNT }, () => ({
+      sx: (Math.random() - 0.5) * 24,
+      sy: (Math.random() - 0.5) * 16,
+      ex: (Math.random() - 0.5) * 16,
+      ey: (Math.random() - 0.5) * 16,
     }))
   ).current;
 
-  const labelOpacity = useRef(new Animated.Value(0)).current;
-  const labelScale = useRef(new Animated.Value(0.6)).current;
-  const handNameOpacity = useRef(new Animated.Value(0)).current;
-  const handNameScale = useRef(new Animated.Value(0.4)).current;
-  const handNameY = useRef(new Animated.Value(0)).current;
-  const cardsOpacity = useRef(new Animated.Value(0)).current;
-  const cardsScale = useRef(new Animated.Value(0.5)).current;
+  return (
+    <>
+      {offsets.map((o, i) => {
+        const fromX = origin.x - SWEEP_COIN_SIZE / 2 + o.sx;
+        const fromY = origin.y - SWEEP_COIN_SIZE / 2 + o.sy;
+        const toX = target.x - SWEEP_COIN_SIZE / 2 + o.ex;
+        const toY = target.y - SWEEP_COIN_SIZE / 2 + o.ey;
+        return (
+          <SweepCoin
+            key={i}
+            fromX={fromX}
+            fromY={fromY}
+            dx={toX - fromX}
+            dy={toY - fromY}
+            delay={i * SWEEP_STAGGER}
+          />
+        );
+      })}
+      <SweepLabel
+        x={origin.x}
+        y={origin.y - 70}
+        text={handName.toUpperCase()}
+        color={gold}
+        fontSize={13}
+        delay={0}
+        holdMs={3500}
+        onDone={onComplete}
+      />
+      <SweepLabel
+        x={target.x}
+        y={target.y - 52}
+        text={`+${formatValue(winAmount)}`}
+        color="#00FF88"
+        fontSize={10}
+        delay={300}
+        holdMs={3000}
+      />
+    </>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Win popup — small bottom-right toast showing winner info
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface WinPopupProps {
+  winnerName: string;
+  handName: string;
+  bestHandCards: CardValue[];
+  winAmount: number;
+  formatValue: (v: number) => string;
+}
+
+const WinPopup = memo(function WinPopup({ winnerName, handName, bestHandCards, winAmount, formatValue }: WinPopupProps) {
+  const slideAnim = useRef(new Animated.Value(120)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const chipAnims = chips.map((chip, i) => {
-      const tx = target.x + (Math.random() - 0.5) * 14;
-      const ty = target.y + (Math.random() - 0.5) * 14;
-      return Animated.sequence([
-        Animated.delay(i * 55),
-        Animated.parallel([
-          Animated.timing(chip.x, { toValue: tx, duration: 520, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(chip.y, { toValue: ty, duration: 520, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.sequence([
-            Animated.timing(chip.opacity, { toValue: 1, duration: 60, useNativeDriver: true }),
-            Animated.delay(340),
-            Animated.timing(chip.opacity, { toValue: 0, duration: 160, useNativeDriver: true }),
-          ]),
-          Animated.sequence([
-            Animated.timing(chip.scale, { toValue: 1.1, duration: 220, useNativeDriver: true }),
-            Animated.timing(chip.scale, { toValue: 0.7, duration: 300, useNativeDriver: true }),
-          ]),
-        ]),
-      ]);
-    });
-
-    const labelAnim = Animated.sequence([
-      Animated.delay(180),
-      Animated.parallel([
-        Animated.timing(labelOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-        Animated.timing(labelScale, { toValue: 1, duration: 220, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
-      ]),
-      Animated.delay(800),
-      Animated.parallel([
-        Animated.timing(labelOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(labelScale, { toValue: 1.2, duration: 300, useNativeDriver: true }),
-      ]),
-    ]);
-
-    const handNameAnim = Animated.sequence([
-      Animated.parallel([
-        Animated.timing(handNameOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.timing(handNameScale, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
-      ]),
-      Animated.delay(1400),
-      Animated.parallel([
-        Animated.timing(handNameOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(handNameY, { toValue: -18, duration: 300, useNativeDriver: true }),
-      ]),
-    ]);
-
-    const cardsAnim = Animated.sequence([
-      Animated.delay(200),
-      Animated.parallel([
-        Animated.timing(cardsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.timing(cardsScale, { toValue: 1, duration: 300, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
-      ]),
-      Animated.delay(1200),
-      Animated.timing(cardsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ]);
-
-    Animated.parallel([...chipAnims, labelAnim, handNameAnim, cardsAnim]).start(() => onComplete());
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue: 0, duration: 350, easing: Easing.out(Easing.back(1.2)), useNativeDriver: true }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+    ]).start();
   }, []);
 
   return (
-    <>
-      {chips.map((chip, i) => (
-        <Animated.View
-          key={i}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: -10, top: -10,
-            width: 20, height: 20,
-            borderRadius: 10,
-            backgroundColor: gold,
-            borderWidth: 2,
-            borderColor: '#B8860B',
-            opacity: chip.opacity,
-            transform: [{ translateX: chip.x }, { translateY: chip.y }, { scale: chip.scale }],
-            ...Platform.select({
-              ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 6 },
-              android: { elevation: 6 },
-              default: {},
-            }),
-          }}
-        />
-      ))}
-      {/* Winning hand name — bursts from pot center */}
-      <Animated.Text
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: origin.x - 110,
-          top: origin.y - 70,
-          width: 220,
-          textAlign: 'center',
-          fontFamily: 'PressStart2P_400Regular',
-          fontSize: 13,
-          color: gold,
-          opacity: handNameOpacity,
-          transform: [{ scale: handNameScale }, { translateY: handNameY }],
-          textShadowColor: 'rgba(0,0,0,0.9)',
-          textShadowOffset: { width: 0, height: 2 },
-          textShadowRadius: 6,
-          zIndex: 55,
-        }}
-      >
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        bottom: 160,
+        right: 10,
+        backgroundColor: 'rgba(15, 5, 30, 0.92)',
+        borderWidth: 1,
+        borderColor: gold,
+        borderRadius: 12,
+        padding: 14,
+        maxWidth: 190,
+        zIndex: 70,
+        opacity: opacityAnim,
+        transform: [{ translateX: slideAnim }],
+        ...Platform.select({
+          ios: { shadowColor: gold, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8 },
+          android: { elevation: 8 },
+          default: {},
+        }),
+      }}
+    >
+      <Text style={{
+        fontFamily: 'PressStart2P_400Regular',
+        fontSize: 7,
+        lineHeight: 14,
+        color: '#FFF',
+        marginBottom: 6,
+      }}>
+        {winnerName.toUpperCase()} WINS
+      </Text>
+      <Text style={{
+        fontFamily: 'PressStart2P_400Regular',
+        fontSize: 8,
+        lineHeight: 16,
+        color: gold,
+        marginBottom: 6,
+      }}>
         {handName.toUpperCase()}
-      </Animated.Text>
-
-      {/* +amount label near winner's avatar */}
-      <Animated.Text
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: target.x - 55,
-          top: target.y - 52,
-          width: 110,
-          textAlign: 'center',
-          fontFamily: 'PressStart2P_400Regular',
-          fontSize: 10,
-          color: '#00FF88',
-          opacity: labelOpacity,
-          transform: [{ scale: labelScale }],
-          textShadowColor: '#000',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
-          zIndex: 60,
-        }}
-      >
+      </Text>
+      <Text style={{
+        fontFamily: 'PressStart2P_400Regular',
+        fontSize: 7,
+        lineHeight: 14,
+        color: '#00FF88',
+        marginBottom: 8,
+      }}>
         +{formatValue(winAmount)}
-      </Animated.Text>
-
-      {/* Winning hand cards + winner name — centered on screen */}
+      </Text>
       {bestHandCards.length > 0 && (
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: origin.x - 130,
-            top: origin.y + 20,
-            width: 260,
-            alignItems: 'center',
-            opacity: cardsOpacity,
-            transform: [{ scale: cardsScale }],
-            zIndex: 58,
-          }}
-        >
-          <Text style={{
-            fontFamily: 'PressStart2P_400Regular',
-            fontSize: 8,
-            color: '#FFF',
-            marginBottom: 6,
-            textShadowColor: '#000',
-            textShadowOffset: { width: 0, height: 1 },
-            textShadowRadius: 4,
-          }}>
-            {winnerName.toUpperCase()} WINS
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 4 }}>
-            {bestHandCards.map((card, i) => (
-              <PokerCard key={i} card={card} style={{ width: 38, height: 54 }} />
-            ))}
-          </View>
-        </Animated.View>
+        <View style={{ flexDirection: 'row', gap: 3 }}>
+          {bestHandCards.map((card, i) => (
+            <PokerCard key={i} card={card} style={{ width: 28, height: 40 }} />
+          ))}
+        </View>
       )}
-    </>
+    </Animated.View>
   );
 });
 
@@ -948,12 +1052,77 @@ const PhaseBadge = memo(function PhaseBadge({ phase }: { phase: string }) {
 
 const pbStyles = StyleSheet.create({
   badge: {
-    position: 'absolute', top: -24, alignSelf: 'center',
+    alignSelf: 'center',
     backgroundColor: 'rgba(81,46,123,0.92)',
     borderWidth: 1, borderColor: gold, borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 3,
+    paddingHorizontal: 10, paddingVertical: 3, marginBottom: 6,
   },
   text: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 1 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pot display with coin stack
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COIN_SIZE = 22;
+
+/**
+ * Derive 1–5 coins based on pot size relative to big blind.
+ * 1 coin  = pot ≤ 2 BB
+ * 2 coins = pot ≤ 5 BB
+ * 3 coins = pot ≤ 10 BB
+ * 4 coins = pot ≤ 20 BB
+ * 5 coins = pot > 20 BB
+ */
+function getCoinCount(pot: number, bigBlind: number): number {
+  if (bigBlind <= 0) return 1;
+  const ratio = pot / bigBlind;
+  if (ratio <= 2) return 1;
+  if (ratio <= 5) return 2;
+  if (ratio <= 10) return 3;
+  if (ratio <= 20) return 4;
+  return 5;
+}
+
+const PotDisplay = memo(function PotDisplay({
+  pot, bigBlind, formatValue,
+}: { pot: number; bigBlind: number; formatValue: (v: number) => string }) {
+  if (pot <= 0) return null;
+  const count = getCoinCount(pot, bigBlind);
+  return (
+    <View style={potStyles.wrap}>
+      <View style={potStyles.coinRow}>
+        {Array.from({ length: count }).map((_, i) => (
+          <Image
+            key={i}
+            source={COIN_IMG}
+            style={[
+              potStyles.coin,
+              { marginLeft: i === 0 ? 0 : -8, zIndex: count - i },
+            ]}
+          />
+        ))}
+      </View>
+      <Text style={potStyles.label}>POT: {formatValue(pot)}</Text>
+    </View>
+  );
+});
+
+const potStyles = StyleSheet.create({
+  wrap: {
+    alignItems: 'center', gap: 3, marginBottom: 8,
+  },
+  coinRow: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    marginBottom: 6,
+  },
+  coin: {
+    width: COIN_SIZE, height: COIN_SIZE,
+  },
+  label: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold,
+    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1123,7 +1292,8 @@ export default function TableScreen() {
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const isPractice = id.startsWith('practice-');
-  const fmtValue = useMemo(() => getFormatter(isPractice), [isPractice]);
+  const isSeeker = id.startsWith('seeker-');
+  const fmtValue = useMemo(() => getFormatter(isPractice, isSeeker), [isPractice, isSeeker]);
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
   // Top bar: safe-area + 6 margin + ~52px bar = insets.top + 58
@@ -1159,6 +1329,8 @@ export default function TableScreen() {
   const reservedSeats = useGameStore((s) => s.reservedSeats);
   const tablMinBuyIn = useGameStore((s) => s.minBuyIn);
   const tablMaxBuyIn = useGameStore((s) => s.maxBuyIn);
+  const tablSmallBlind = useGameStore((s) => s.smallBlind);
+  const tablBigBlind = useGameStore((s) => s.bigBlind);
   const raiseAmount = useGameStore((s) => s.raiseAmount);
   const setRaiseAmount = useGameStore((s) => s.setRaiseAmount);
   const myHand = useGameStore((s) => s.myHand);
@@ -1182,8 +1354,10 @@ export default function TableScreen() {
     visible: false, seatIndex: 0,
   });
   const [leaveConfirmVisible, setLeaveConfirmVisible] = useState(false);
+  const [roomInfoVisible, setRoomInfoVisible] = useState(false);
   const [leavingInProgress, setLeavingInProgress] = useState(false);
   const [cashOutAlert, setCashOutAlert] = useState<{ title: string; message: string } | null>(null);
+  const [magnifyInfo, setMagnifyInfo] = useState<CardMagnifyInfo | null>(null);
   const leftAlreadyRef = useRef(false);
 
   // ── Busted out — player stays as spectator ──────────────────────────────
@@ -1237,17 +1411,19 @@ export default function TableScreen() {
     try {
       const result = await SocketService.leaveTableWithPayout(id);
       if (result && result.amount > 0) {
-        const sol = result.amount / 1_000_000_000;
-        const amtStr = sol >= 0.01 ? sol.toFixed(2) : sol.toFixed(4);
+        const tokenLabel = isSeeker ? 'SEEKER' : 'SOL';
+        const amtStr = isSeeker
+          ? result.amount.toLocaleString()
+          : (() => { const sol = result.amount / 1_000_000_000; return sol >= 0.01 ? sol.toFixed(2) : sol.toFixed(4); })();
         if (result.txSignature) {
           setCashOutAlert({
             title: 'CASH OUT COMPLETE',
-            message: `${amtStr} SOL has been transferred to your wallet.`,
+            message: `${amtStr} ${tokenLabel} has been transferred to your wallet.`,
           });
         } else {
           setCashOutAlert({
             title: 'CASH OUT FAILED',
-            message: `Transfer of ${amtStr} SOL failed. Please contact support.`,
+            message: `Transfer of ${amtStr} ${tokenLabel} failed. Please contact support.`,
           });
         }
         // Don't navigate yet — wait for user to dismiss the alert
@@ -1324,10 +1500,10 @@ export default function TableScreen() {
   // ── Animation layout coords (absolute screen coords) ──────────────────────
   // The tableArea has `top: TABLE_TOP` + `marginTop: -90`, so visual top = TABLE_TOP - 90
   const tableVisualTop = TABLE_TOP - 90;
-  // Community cards are at 42% down the table + half card height (31) to reach center
+  // Community cards are at 36% down the table + pot/badge height (~50) + half card height (31)
   const deckOrigin = {
     x: screenW / 2,
-    y: tableVisualTop + TABLE_H * 0.42 + 31,
+    y: tableVisualTop + TABLE_H * 0.36 + 50 + 31,
   };
 
   // Compute center of any seat given its SEAT_POSITIONS entry
@@ -1366,6 +1542,7 @@ export default function TableScreen() {
           maxBuyIn={tablMaxBuyIn || 100_000_000}
           onClose={closeBuyIn}
           isPractice={id.startsWith('practice-')}
+          tokenType={id.startsWith('seeker-') ? 'SEEKER' : 'SOL'}
         />
       )}
 
@@ -1384,6 +1561,17 @@ export default function TableScreen() {
         />
       ))}
 
+      {/* Win popup — bottom-right toast */}
+      {lastHandResult && lastHandResult.winners.length > 0 && (
+        <WinPopup
+          winnerName={lastHandResult.winners[0].name}
+          handName={lastHandResult.winners[0].bestHandName}
+          bestHandCards={lastHandResult.winners[0].bestHandCards ?? []}
+          winAmount={lastHandResult.winners[0].winAmount}
+          formatValue={fmtValue}
+        />
+      )}
+
       {/* Countdown overlay */}
       {phase === 'countdown' && <CountdownOverlay seconds={countdownSeconds} />}
 
@@ -1396,30 +1584,32 @@ export default function TableScreen() {
 
         {/* Community cards + phase badge + pot */}
         <View style={styles.communityOverlay}>
+          <PotDisplay pot={pot} bigBlind={tablBigBlind} formatValue={fmtValue} />
           <PhaseBadge phase={phase} />
-          <View style={styles.communityRow}>
-            {[0, 1, 2, 3, 4].map((i) => {
-              const card = communityCards[i] as CardValue | null;
-              const showBack = !card && isInHand;
-              return (
-                <View key={i} style={styles.communitySlot}>
-                  {card
-                    ? <PokerCard card={card} style={styles.cardSize} />
-                    : showBack
-                      ? <PokerCard card={null} faceDown style={styles.cardSize} />
-                      : <View style={styles.emptyCard} />}
-                </View>
-              );
-            })}
-          </View>
-          {pot > 0 && <Text style={styles.potLabel}>POT: {fmtValue(pot)}</Text>}
+          {!lastHandResult && (
+            <View style={styles.communityRow}>
+              {[0, 1, 2, 3, 4].map((i) => {
+                const card = communityCards[i] as CardValue | null;
+                const showBack = !card && isInHand;
+                return (
+                  <View key={i} style={styles.communitySlot}>
+                    {card
+                      ? <PokerCard card={card} style={styles.cardSize} onMagnifyStart={setMagnifyInfo} onMagnifyEnd={() => setMagnifyInfo(null)} />
+                      : showBack
+                        ? <PokerCard card={null} faceDown style={styles.cardSize} />
+                        : <View style={styles.emptyCard} />}
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Player's hole cards — shown below pot, only when in a hand */}
           {isInHand && mySeatIndex !== null && (
             <View style={styles.holeCardsRow}>
               {myHand.map((card, i) =>
                 card ? (
-                  <PokerCard key={i} card={card as CardValue} style={styles.holeCard} />
+                  <PokerCard key={i} card={card as CardValue} style={styles.holeCard} onMagnifyStart={setMagnifyInfo} onMagnifyEnd={() => setMagnifyInfo(null)} />
                 ) : (
                   <PokerCard key={i} card={null} faceDown style={styles.holeCard} />
                 )
@@ -1465,6 +1655,10 @@ export default function TableScreen() {
             </Text>
           </View>
         )}
+        <View style={{ flex: 1 }} />
+        <Pressable style={({ pressed }) => [styles.infoBtn, pressed && { opacity: 0.7 }]} onPress={() => setRoomInfoVisible(true)}>
+          <MaterialCommunityIcons name="information-outline" size={20} color={gold} />
+        </Pressable>
         <Pressable
           style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnP]}
           onPress={handleLeave}>
@@ -1495,6 +1689,87 @@ export default function TableScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Room info modal */}
+      <Modal
+        visible={roomInfoVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRoomInfoVisible(false)}>
+        <Pressable style={rmStyles.overlay} onPress={() => setRoomInfoVisible(false)}>
+          <Pressable style={rmStyles.panel} onPress={(e) => e.stopPropagation?.()}>
+            <Text style={rmStyles.title}>ROOM INFO</Text>
+            <Pressable
+              onPress={async () => {
+                if (id) {
+                  await Clipboard.setStringAsync(id);
+                }
+              }}
+              style={rmStyles.idRow}>
+              <Text style={rmStyles.label}>ROOM ID</Text>
+              <Text style={rmStyles.idValue}>{id ?? '—'}</Text>
+              <Text style={rmStyles.copyHint}>TAP TO COPY</Text>
+            </Pressable>
+            <View style={rmStyles.divider} />
+            <View style={rmStyles.row}>
+              <Text style={rmStyles.label}>BLINDS</Text>
+              <Text style={rmStyles.value}>
+                {isPractice
+                  ? `${tablSmallBlind}/${tablBigBlind} chips`
+                  : isSeeker
+                  ? `${formatSeekerValue(tablSmallBlind)} / ${formatSeekerValue(tablBigBlind)}`
+                  : `${formatSol(tablSmallBlind)} / ${formatSol(tablBigBlind)}`}
+              </Text>
+            </View>
+            <View style={rmStyles.row}>
+              <Text style={rmStyles.label}>BUY-IN</Text>
+              <Text style={rmStyles.value}>
+                {isPractice
+                  ? `${(tablMinBuyIn || 0).toLocaleString()} – ${(tablMaxBuyIn || 0).toLocaleString()} chips`
+                  : isSeeker
+                  ? `${formatSeekerValue(tablMinBuyIn || 0)} – ${formatSeekerValue(tablMaxBuyIn || 0)}`
+                  : `${formatSol(tablMinBuyIn || 0)} – ${formatSol(tablMaxBuyIn || 0)}`}
+              </Text>
+            </View>
+            <View style={rmStyles.row}>
+              <Text style={rmStyles.label}>PLAYERS</Text>
+              <Text style={rmStyles.value}>{seatedCount} / 6</Text>
+            </View>
+            <View style={rmStyles.row}>
+              <Text style={rmStyles.label}>TURN TIMER</Text>
+              <Text style={rmStyles.value}>{turnTimeoutMs ? `${turnTimeoutMs / 1000}s` : '—'}</Text>
+            </View>
+            <View style={rmStyles.row}>
+              <Text style={rmStyles.label}>TYPE</Text>
+              <Text style={rmStyles.value}>{isPractice ? 'PRACTICE' : isSeeker ? 'SEEKER' : 'SOL'}</Text>
+            </View>
+            <View style={rmStyles.divider} />
+            <Pressable style={rmStyles.closeBtn} onPress={() => setRoomInfoVisible(false)}>
+              <Text style={rmStyles.closeBtnText}>CLOSE</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Card magnifier — floats above the held card */}
+      {magnifyInfo && (() => {
+        const centerX = magnifyInfo.x + magnifyInfo.width / 2;
+        let left = centerX - MAGNIFY_W / 2;
+        // Clamp horizontally within screen
+        left = Math.max(8, Math.min(left, screenW - MAGNIFY_W - 8));
+        // Prefer above the card; if too close to top, show below
+        const aboveTop = magnifyInfo.y - MAGNIFY_H - 12;
+        const top = aboveTop > 20
+          ? aboveTop
+          : magnifyInfo.y + magnifyInfo.height + 12;
+        return (
+          <View pointerEvents="none" style={[mgStyles.wrap, { left, top }]}>
+            <View style={mgStyles.cardWrap}>
+              <PokerCard card={magnifyInfo.card} style={mgStyles.card} />
+            </View>
+          </View>
+        );
+      })()}
 
       {/* Leaving / payout in progress overlay */}
       {leavingInProgress && !cashOutAlert && (
@@ -1548,7 +1823,7 @@ export default function TableScreen() {
                   max={maxRaise}
                   value={Math.max(minRaise, Math.min(maxRaise, raiseAmount))}
                   onChange={setRaiseAmount}
-                  isPractice={isPractice}
+                  isPractice={isPractice || isSeeker}
                 />
               </View>
 
@@ -1578,7 +1853,7 @@ const styles = StyleSheet.create({
   tableImage: { width: '95%', height: '100%', alignSelf: 'center' },
 
   communityOverlay: {
-    position: 'absolute', top: '42%',
+    position: 'absolute', top: '36%',
     left: 0, right: 0,
     alignItems: 'center', justifyContent: 'center',
   },
@@ -1594,11 +1869,6 @@ const styles = StyleSheet.create({
       android: { elevation: 4 }, default: {},
     }),
   },
-  potLabel: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold, marginTop: 8,
-    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
-  },
-
   seatWrap: { position: 'absolute', zIndex: 20 },
 
   // Top bar
@@ -1642,6 +1912,12 @@ const styles = StyleSheet.create({
     fontSize: Platform.OS === 'web' ? 8 : 7,
     color: '#fff',
     letterSpacing: 0.5,
+  },
+  infoBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderWidth: 1.5, borderColor: 'rgba(255,215,0,0.4)',
+    alignItems: 'center', justifyContent: 'center',
   },
 
   // Bottom controls
@@ -1697,7 +1973,48 @@ const styles = StyleSheet.create({
   },
 });
 
+// Room info modal styles
+const rmStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  panel: {
+    width: '100%', maxWidth: 340,
+    backgroundColor: 'rgba(26,10,46,0.98)', borderRadius: 20, borderWidth: 2, borderColor: gold, padding: 22, gap: 10,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.7, shadowRadius: 24 },
+      android: { elevation: 24 }, default: {},
+    }),
+  },
+  title: { fontFamily: 'PressStart2P_400Regular', fontSize: 12, color: gold, textAlign: 'center', letterSpacing: 1, marginBottom: 4 },
+  idRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', gap: 4 },
+  idValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold, letterSpacing: 0.5 },
+  copyHint: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.35)' },
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 },
+  label: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.45)', letterSpacing: 1 },
+  value: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.9)' },
+  closeBtn: { alignItems: 'center', paddingVertical: 8 },
+  closeBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: 'rgba(255,255,255,0.4)' },
+});
+
 // Leave-confirmation modal styles
+const MAGNIFY_W = 110;
+const MAGNIFY_H = 157;
+
+const mgStyles = StyleSheet.create({
+  wrap: {
+    position: 'absolute', zIndex: 999,
+  },
+  cardWrap: {
+    borderRadius: 10, overflow: 'hidden',
+    borderWidth: 2, borderColor: 'rgba(255,215,0,0.6)',
+    ...Platform.select({
+      ios: { shadowColor: gold, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 12 },
+      android: { elevation: 16 }, default: {},
+    }),
+  },
+  card: { width: MAGNIFY_W, height: MAGNIFY_H, borderRadius: 8 },
+});
+
 const lcStyles = StyleSheet.create({
   overlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.78)',

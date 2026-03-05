@@ -50,13 +50,25 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
   const authorize = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    try {
-      await connect();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsLoading(false);
+    const MAX_RETRIES = 2;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        await connect();
+        setIsLoading(false);
+        return; // success
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // On last attempt, surface the error
+        if (attempt === MAX_RETRIES - 1) {
+          setError(`${msg} — please make sure Solflare is open and try again.`);
+        }
+        // Brief pause before retry
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
     }
+    setIsLoading(false);
   }, [connect]);
 
   const deauthorize = useCallback(async () => {

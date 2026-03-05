@@ -22,6 +22,7 @@ export interface LobbyTable {
   isPractice: boolean;
   occupiedSeats: number[];
   reservedSeats?: number[];
+  tokenType?: 'SOL' | 'SEEKER';
 }
 
 interface LobbyState {
