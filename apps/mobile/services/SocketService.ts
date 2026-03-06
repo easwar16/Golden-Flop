@@ -188,6 +188,11 @@ class SocketServiceClass {
     this.socket?.emit('request_tables');
   }
 
+  /** Leave the lobby broadcast group (when entering a table). */
+  leaveLobby(): void {
+    this.socket?.emit('leave_lobby');
+  }
+
   // ── Game actions ───────────────────────────────────────────────────────
 
   sendAction(tableId: string, action: PlayerAction, amount?: number): void {

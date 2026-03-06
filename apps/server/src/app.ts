@@ -11,7 +11,8 @@ import type {
 import { RoomManager } from './room/RoomManager';
 import { TableRegistry } from './table/TableRegistry';
 import { registerSocketHandlers } from './socket/SocketHandler';
-import { initRedis } from './redis/RedisClient';
+import { initRedis, getRedis } from './redis/RedisClient';
+import { createAdapter } from '@socket.io/redis-adapter';
 import { authRouter } from './auth/authRoutes';
 import { depositRouter } from './deposit/depositRoutes';
 import { vaultDepositRouter } from './deposit/vaultDepositRoutes';
@@ -67,6 +68,15 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
 
   if (!skipRedis) {
     await initRedis();
+
+    // ── Socket.io Redis adapter (enables multi-server scaling) ───────────
+    const redis = getRedis();
+    if (redis) {
+      const pubClient = redis.duplicate();
+      const subClient = redis.duplicate();
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('[socket.io] Redis adapter attached — horizontal scaling enabled');
+    }
   }
 
   // ── Prisma connection (skip in unit tests) ─────────────────────────────

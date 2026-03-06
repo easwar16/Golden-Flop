@@ -57,19 +57,21 @@ type Tier = { label: string; accentColor: string; borderColor: string; shadowCol
 
 function getTier(bigBlind: number): Tier {
   const bb = bigBlind / LAMPORTS_PER_SOL;
-  if (bb <= 0.001)  return { label: 'LOW',  accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',  shadowColor: '#00FFFF', isVip: false };
-  if (bb <= 0.005)  return { label: 'MID',  accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',  shadowColor: '#FFD700', isVip: false };
-  if (bb <= 0.02)   return { label: 'HIGH', accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)', shadowColor: '#FF3B6F', isVip: false };
-  return                     { label: 'VIP',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)', shadowColor: '#BF5FFF', isVip: true  };
+  if (bb <= 0.0002) return { label: 'MICRO', accentColor: '#7FFFD4', borderColor: 'rgba(127,255,212,0.55)', shadowColor: '#7FFFD4', isVip: false };
+  if (bb <= 0.001)  return { label: 'LOW',   accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false };
+  if (bb <= 0.005)  return { label: 'MID',   accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false };
+  if (bb <= 0.02)   return { label: 'HIGH',  accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)',  shadowColor: '#FF3B6F', isVip: false };
+  return                     { label: 'VIP',   accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  };
 }
 
 // ─── Table name per tier ──────────────────────────────────────────────────────
 
 const TIER_NAMES: Record<string, string[]> = {
-  LOW:  ['PIXEL PARADISE', 'NEON ALLEY',    'COIN CORNER',   'STARTER DECK',  'LUCKY LANE',    'COPPER CHIP',   'SILVER SPARK',  'ROOKIE ROOM'],
-  MID:  ['GOLDEN TABLE',   'VELVET ROOM',   'DIAMOND LOUNGE','HIGH STREET',   'AMBER HALL',    'JADE TERRACE',  'CRYSTAL CLUB',  'EMBER LOUNGE'],
-  HIGH: ['ROYAL FLUSH',    'IRON THRONE',   'PRESTIGE ROOM', 'THE PENTHOUSE', 'OBSIDIAN ROOM', 'SCARLET SUITE'],
-  VIP:  ['ACE HIGH',       'CROWN JEWELS',  'PLATINUM SUITE','INFINITY TABLE'],
+  MICRO:['PENNY LANE',     'DUST BOWL',     'ROOKIE PIT',    'TINY TABLE',    'COPPER POT',    'FIRST STEPS',   'CHIP STARTER',  'NANO ROOM',     'SMALL FRY',    'PIXEL DUST'],
+  LOW:  ['PIXEL PARADISE', 'NEON ALLEY',    'COIN CORNER',   'STARTER DECK',  'LUCKY LANE',    'COPPER CHIP',   'SILVER SPARK',  'ROOKIE ROOM',   'BRONZE GATE',  'GREEN FELT'],
+  MID:  ['GOLDEN TABLE',   'VELVET ROOM',   'DIAMOND LOUNGE','HIGH STREET',   'AMBER HALL',    'JADE TERRACE',  'CRYSTAL CLUB',  'EMBER LOUNGE',  'SAPPHIRE DEN', 'RUBY ROOM'],
+  HIGH: ['ROYAL FLUSH',    'IRON THRONE',   'PRESTIGE ROOM', 'THE PENTHOUSE', 'OBSIDIAN ROOM', 'SCARLET SUITE', 'TITAN TABLE',   'DRAGON DEN',    'INFERNO ROOM', 'BLAZE HALL'],
+  VIP:  ['ACE HIGH',       'CROWN JEWELS',  'PLATINUM SUITE','INFINITY TABLE','DIAMOND VAULT', 'CELESTIAL ROOM'],
 };
 
 const tierTableCounts: Record<string, number> = {};
@@ -107,6 +109,7 @@ function getTableBadge(t: LobbyTable, allTables: LobbyTable[]): TableBadge {
 // ─── Table speed ──────────────────────────────────────────────────────────────
 
 function getTableSpeed(turnTimeoutMs: number): string {
+  if (turnTimeoutMs <= 10_000) return 'TURBO';
   if (turnTimeoutMs <= 15_000) return 'FAST';
   if (turnTimeoutMs <= 30_000) return 'NORMAL';
   return 'SLOW';
@@ -216,37 +219,62 @@ function BuyInModal({ visible, tableName, tier, minBuyIn, maxBuyIn, amount, onCh
 
 // ─── Practice tier mapping ────────────────────────────────────────────────────
 
-const PRACTICE_TIERS: Record<string, Tier> = {
-  'practice-beginner':    { label: 'EASY',    accentColor: '#22c55e', borderColor: 'rgba(34,197,94,0.55)',   shadowColor: '#22c55e', isVip: false },
-  'practice-casual':      { label: 'FUN',     accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false },
-  'practice-advanced':    { label: 'INTENSE', accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false },
-  'practice-highroller':  { label: 'VIP',     accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  },
-};
-
 function getPracticeTier(tableId: string): Tier {
-  return PRACTICE_TIERS[tableId] ?? { label: 'FUN', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false };
+  if (tableId.startsWith('practice-beginner'))   return { label: 'EASY',    accentColor: '#22c55e', borderColor: 'rgba(34,197,94,0.55)',   shadowColor: '#22c55e', isVip: false };
+  if (tableId.startsWith('practice-casual'))     return { label: 'FUN',     accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false };
+  if (tableId.startsWith('practice-advanced'))   return { label: 'INTENSE', accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false };
+  if (tableId.startsWith('practice-highroller')) return { label: 'VIP',     accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  };
+  if (tableId.startsWith('practice-turbo'))      return { label: 'TURBO',   accentColor: '#FF6B35', borderColor: 'rgba(255,107,53,0.65)',  shadowColor: '#FF6B35', isVip: false };
+  if (tableId.startsWith('practice-headsup'))    return { label: '1v1',     accentColor: '#00E5FF', borderColor: 'rgba(0,229,255,0.55)',   shadowColor: '#00E5FF', isVip: false };
+  return { label: 'FUN', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false };
 }
 
-const PRACTICE_NAMES: Record<string, string> = {
-  'practice-beginner':   'BEGINNER TABLE',
-  'practice-casual':     'CASUAL LOUNGE',
-  'practice-advanced':   'ADVANCED ROOM',
-  'practice-highroller': 'HIGH ROLLER',
-};
+function getPracticeName(tableId: string): string {
+  if (tableId.startsWith('practice-beginner'))   return 'BEGINNER TABLE';
+  if (tableId.startsWith('practice-casual'))     return 'CASUAL LOUNGE';
+  if (tableId.startsWith('practice-advanced'))   return 'ADVANCED ROOM';
+  if (tableId.startsWith('practice-highroller')) return 'HIGH ROLLER';
+  if (tableId.startsWith('practice-turbo'))      return 'TURBO PRACTICE';
+  if (tableId.startsWith('practice-headsup'))    return 'HEADS UP';
+  return tableId;
+}
 
 // ─── SEEKER tier mapping ──────────────────────────────────────────────────────
 
 function getSeekerTier(bigBlind: number): Tier {
-  if (bigBlind <= 10)   return { label: 'LOW',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.55)',  shadowColor: '#BF5FFF', isVip: false };
-  if (bigBlind <= 50)   return { label: 'MID',  accentColor: '#9B30FF', borderColor: 'rgba(155,48,255,0.75)',  shadowColor: '#9B30FF', isVip: false };
-  return                        { label: 'HIGH', accentColor: '#7B1FA2', borderColor: 'rgba(123,31,162,0.75)', shadowColor: '#7B1FA2', isVip: false };
+  if (bigBlind <= 5)    return { label: 'MICRO', accentColor: '#CE93D8', borderColor: 'rgba(206,147,216,0.55)', shadowColor: '#CE93D8', isVip: false };
+  if (bigBlind <= 10)   return { label: 'LOW',   accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.55)',  shadowColor: '#BF5FFF', isVip: false };
+  if (bigBlind <= 50)   return { label: 'MID',   accentColor: '#9B30FF', borderColor: 'rgba(155,48,255,0.75)',  shadowColor: '#9B30FF', isVip: false };
+  if (bigBlind <= 200)  return { label: 'HIGH',  accentColor: '#7B1FA2', borderColor: 'rgba(123,31,162,0.75)', shadowColor: '#7B1FA2', isVip: false };
+  return                         { label: 'VIP',   accentColor: '#4A148C', borderColor: 'rgba(74,20,140,0.85)',  shadowColor: '#4A148C', isVip: true  };
 }
 
-const SEEKER_NAMES: Record<string, string> = {
-  'seeker-low-1':  'SEEKER LOUNGE',
-  'seeker-mid-1':  'SEEKER ARENA',
-  'seeker-high-1': 'SEEKER VAULT',
-};
+const SEEKER_TIER_NAMES: string[][] = [
+  ['SEEKER PIT', 'SEEKER NEST', 'SEEKER COVE', 'SEEKER DEN', 'SEEKER NOOK', 'SEEKER BURROW', 'SEEKER HOLLOW', 'SEEKER CREEK'],
+  ['SEEKER LOUNGE', 'SEEKER GROVE', 'SEEKER MEADOW', 'SEEKER GARDEN', 'SEEKER OASIS', 'SEEKER PLAZA', 'SEEKER COURT', 'SEEKER TERRACE'],
+  ['SEEKER ARENA', 'SEEKER FORGE', 'SEEKER TOWER', 'SEEKER CITADEL', 'SEEKER BASTION', 'SEEKER SANCTUM', 'SEEKER KEEP', 'SEEKER HALL'],
+  ['SEEKER VAULT', 'SEEKER SUMMIT', 'SEEKER PEAK', 'SEEKER APEX', 'SEEKER ZENITH', 'SEEKER SPIRE'],
+  ['SEEKER THRONE', 'SEEKER CROWN', 'SEEKER DYNASTY', 'SEEKER EMPIRE', 'SEEKER DOMINION'],
+];
+
+function getSeekerTierIndex(bigBlind: number): number {
+  if (bigBlind <= 5)   return 0; // micro
+  if (bigBlind <= 20)  return 1; // low
+  if (bigBlind <= 100) return 2; // mid
+  if (bigBlind <= 500) return 3; // high
+  return 4;                       // vip
+}
+
+function computeSeekerNames(tables: { bigBlind: number }[]): string[] {
+  const counters: Record<number, number> = {};
+  return tables.map((t) => {
+    const idx = getSeekerTierIndex(t.bigBlind);
+    const names = SEEKER_TIER_NAMES[idx];
+    const count = counters[idx] ?? 0;
+    counters[idx] = count + 1;
+    return names[count % names.length];
+  });
+}
 
 function formatSeeker(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
@@ -731,6 +759,7 @@ export default function LobbyScreen() {
   }, [solTables]);
 
   const handleJoin = useCallback(async (tableId: string) => {
+    SocketService.leaveLobby();
     await showTransition();
     router.push(`/table/${tableId}`);
   }, [showTransition, router]);
@@ -791,6 +820,7 @@ export default function LobbyScreen() {
     if (!tableId) return;
     const err = await SocketService.joinTable(tableId, min, getPlayerName());
     if (err) { console.warn('[lobby] joinTable after create error:', err); return; }
+    SocketService.leaveLobby();
     router.push(`/table/${tableId}`);
   };
 
@@ -801,14 +831,15 @@ export default function LobbyScreen() {
         .filter((t) => t.isPractice)
         .map((t) => ({
           t,
-          name: PRACTICE_NAMES[t.id] ?? t.name,
+          name: getPracticeName(t.id),
           tier: getPracticeTier(t.id),
         }));
     }
 
     if (activeTab === 'SEEKER') {
+      const seekerNames = computeSeekerNames(seekerTables);
       let list = seekerTables
-        .map((t) => ({ t, name: SEEKER_NAMES[t.id] ?? t.name, tier: getSeekerTier(t.bigBlind) }));
+        .map((t, i) => ({ t, name: seekerNames[i], tier: getSeekerTier(t.bigBlind) }));
 
       if (joinableOnly) list = list.filter(({ t }) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
 

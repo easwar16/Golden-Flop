@@ -19,7 +19,7 @@ import type {
   InterServerEvents,
   SocketData,
 } from '@goldenflop/shared';
-import { RoomManager } from '../room/RoomManager';
+import { RoomManager, LOBBY_ROOM } from '../room/RoomManager';
 import { TableRegistry } from '../table/TableRegistry';
 import { extractSocketUser } from '../auth/jwtMiddleware';
 import { processBuyIn, processCashOut } from '../balance/BalanceService';
@@ -83,11 +83,18 @@ export function registerSocketHandlers(
     // per-table metadata enrichment, or seat-map queries.
 
     socket.on('request_tables', () => {
-      socket.emit('tables_list', roomManager.getLobby());
+      socket.join(LOBBY_ROOM);
+      roomManager.sendLobbyTo(socket.id);
     });
 
     socket.on('get_tables', () => {
-      socket.emit('tables_list', roomManager.getLobby());
+      socket.join(LOBBY_ROOM);
+      roomManager.sendLobbyTo(socket.id);
+    });
+
+    // Leave the lobby broadcast group when entering a table
+    socket.on('leave_lobby', () => {
+      socket.leave(LOBBY_ROOM);
     });
 
     // ── Create table ──────────────────────────────────────────────────────
