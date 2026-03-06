@@ -551,9 +551,8 @@ export class Room {
     this.clearTurnTimer();
     this.handState = result.state;
 
-    // Echo ack to acting player
-    const socket = this.io.sockets.sockets.get(socketId);
-    socket?.emit('action_ack', {
+    // Broadcast action to all players in the room (for SFX, animations, etc.)
+    this.io.to(this.id).emit('action_ack', {
       tableId: this.id,
       playerId: player.id,
       action,

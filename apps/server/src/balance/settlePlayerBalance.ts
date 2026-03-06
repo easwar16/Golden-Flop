@@ -47,13 +47,27 @@ export async function settlePlayerBalance(
       );
       if (sig) {
         console.log(`[economy] vault cash-out: ${target.chips} lamports → ${target.walletAddress} (tx: ${sig})`);
-      } else {
-        console.error(`[economy] vault cash-out FAILED for ${target.walletAddress}, ${target.chips} lamports`);
+        return { txSignature: sig };
       }
-      return { txSignature: sig };
+
+      // On-chain transfer failed — fall back to crediting internal balance
+      // so the player never loses their chips.
+      console.warn(`[economy] vault cash-out failed for ${target.walletAddress}, falling back to internal balance credit`);
+      await processCashOut(target.userId, BigInt(target.chips), tokenType);
+      console.log(`[economy] fallback credit: ${target.chips} chips (${tokenType}) → userId:${target.userId}`);
+      return { txSignature: 'internal' };
     } catch (err) {
-      console.error(`[economy] vault cash-out error:`, err);
-      return { txSignature: null };
+      console.error(`[economy] vault cash-out error, falling back to internal balance:`, err);
+      // Last resort: credit internal balance so chips aren't lost
+      try {
+        const tokenType = target.tokenType ?? 'SOL';
+        await processCashOut(target.userId, BigInt(target.chips), tokenType);
+        console.log(`[economy] fallback credit (after error): ${target.chips} chips (${tokenType}) → userId:${target.userId}`);
+        return { txSignature: 'internal' };
+      } catch (fallbackErr) {
+        console.error(`[economy] CRITICAL: fallback credit also failed:`, fallbackErr);
+        return { txSignature: null };
+      }
     }
   } else if (target.userId) {
     await processCashOut(target.userId, BigInt(target.chips), target.tokenType ?? 'SOL');

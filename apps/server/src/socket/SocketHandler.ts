@@ -387,6 +387,36 @@ export function registerSocketHandlers(
       socket.emit('table_state', room.buildStateFor(seatedPlayer?.id ?? null));
     });
 
+    // ── Emoji reactions ──────────────────────────────────────────────────
+
+    const EMOJI_COOLDOWN_MS = 3_000;
+    const ALLOWED_EMOJIS = new Set(['😂', '😡', '🔥', '👀', '😎', '💰', '🤯', '🙂']);
+    let lastEmojiAt = 0;
+
+    socket.on('emoji_reaction', (payload) => {
+      const now = Date.now();
+      if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return; // rate limit
+      if (!payload.tableId || !payload.emoji) return;
+      if (!ALLOWED_EMOJIS.has(payload.emoji)) return;
+
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) return;
+
+      // Must be seated at the table
+      const seatIndex = room['socketToSeat'].get(socket.id);
+      if (seatIndex === undefined) return;
+
+      lastEmojiAt = now;
+
+      // Broadcast to all players in the room
+      io.to(payload.tableId).emit('emoji_reaction', {
+        tableId: payload.tableId,
+        playerId,
+        seatIndex,
+        emoji: payload.emoji,
+      });
+    });
+
     // ── Player action ─────────────────────────────────────────────────────
 
     socket.on('player_action', (payload) => {

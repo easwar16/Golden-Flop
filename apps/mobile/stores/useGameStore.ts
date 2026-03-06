@@ -140,6 +140,11 @@ interface NetworkSlice {
   reservedSeats: ReservedSeatInfo[];
 }
 
+export interface EmojiReactionInfo {
+  emoji: string;
+  id: string; // unique key for animation re-trigger
+}
+
 interface UISlice {
   /** True while we're in the join/create flow before first table_state arrives */
   isJoining: boolean;
@@ -151,6 +156,8 @@ interface UISlice {
   lastHandResult: HandResultPayload | null;
   /** Non-null when the player was kicked from the table (e.g. busted out) */
   kickedReason: string | null;
+  /** Active emoji reactions per seat (auto-cleared after animation) */
+  emojiReactions: Record<number, EmojiReactionInfo | null>;
 }
 
 interface GameActions {
@@ -171,6 +178,8 @@ interface GameActions {
   /** Set when the player is kicked from the table */
   setKicked: (reason: string) => void;
   clearKicked: () => void;
+  /** Add an emoji reaction at a seat (auto-clears after 3s) */
+  addEmojiReaction: (seatIndex: number, emoji: string) => void;
 }
 
 const EMPTY_SEATS = Array(6).fill(null) as (SeatView | null)[];
@@ -210,6 +219,7 @@ const defaultUISlice: UISlice = {
   raiseAmount: 0,
   lastHandResult: null,
   kickedReason: null,
+  emojiReactions: {},
 };
 
 export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
@@ -287,6 +297,22 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
 
     setKicked: (reason) => set({ kickedReason: reason }),
     clearKicked: () => set({ kickedReason: null }),
+
+    addEmojiReaction: (seatIndex, emoji) => {
+      const id = `${seatIndex}-${Date.now()}`;
+      set((s) => ({
+        emojiReactions: { ...s.emojiReactions, [seatIndex]: { emoji, id } },
+      }));
+      // Auto-clear after animation completes
+      setTimeout(() => {
+        const current = get().emojiReactions[seatIndex];
+        if (current?.id === id) {
+          set((s) => ({
+            emojiReactions: { ...s.emojiReactions, [seatIndex]: null },
+          }));
+        }
+      }, 3000);
+    },
 
     reset: () => set({ ...defaultNetworkSlice, ...defaultUISlice }),
   }))

@@ -13,6 +13,7 @@ import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../stores/useGameStore';
 import { useLobbyStore } from '../stores/useLobbyStore';
 import { useSocketStore } from '../stores/useSocketStore';
+import { playChipToss, playCardShuffle, playWinCoins } from './SoundService';
 
 // ─── Server address ───────────────────────────────────────────────────────────
 // Set EXPO_PUBLIC_SERVER_URL in .env.local (gitignored).
@@ -205,6 +206,11 @@ class SocketServiceClass {
     this.socket?.emit('return_to_table', { tableId });
   }
 
+  /** Send an emoji reaction to the table. */
+  sendEmojiReaction(tableId: string, emoji: string): void {
+    this.socket?.emit('emoji_reaction', { tableId, emoji });
+  }
+
   // ── Event wiring ───────────────────────────────────────────────────────
 
   private bindEvents(): void {
@@ -244,6 +250,11 @@ class SocketServiceClass {
 
     s.on('hand_result', (payload) => {
       useGameStore.getState().applyHandResult(payload);
+      // Play win sound if the local player won
+      const { mySeatIndex } = useGameStore.getState();
+      if (mySeatIndex !== null && payload.winners?.some((w: { seatIndex: number }) => w.seatIndex === mySeatIndex)) {
+        playWinCoins();
+      }
     });
 
     // ── Seat reservation events ─────────────────────────────────────────
@@ -272,6 +283,25 @@ class SocketServiceClass {
     s.on('player_returned', (payload: { tableId: string; playerId: string; seatIndex: number }) => {
       console.log('[socket] player returned:', payload.playerId);
       // table_state will carry the updated state — no extra store action needed
+    });
+
+    // ── Emoji reactions ────────────────────────────────────────────────
+    s.on('emoji_reaction', (payload: { tableId: string; playerId: string; seatIndex: number; emoji: string }) => {
+      useGameStore.getState().addEmojiReaction(payload.seatIndex, payload.emoji);
+    });
+
+    // ── Game SFX ──────────────────────────────────────────────────────
+    s.on('game_started', () => {
+      playCardShuffle();
+    });
+
+    // ── Action SFX (broadcast to all players in the room) ─────────────
+    s.on('action_ack', (payload: { action: string; amount: number }) => {
+      const isChipAction =
+        payload.action === 'raise' ||
+        payload.action === 'all-in' ||
+        (payload.action === 'call' && payload.amount > 0);
+      if (isChipAction) playChipToss();
     });
 
     // ── Lobby events ─────────────────────────────────────────────────────

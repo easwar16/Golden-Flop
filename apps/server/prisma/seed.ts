@@ -53,19 +53,19 @@ interface SolTier {
 }
 
 const SOL_TIERS: SolTier[] = [
-  // Micro
-  { prefix: 'micro-a', smallBlind: 0.00005, bigBlind: 0.0001,  minBuyIn: 0.005, maxBuyIn: 0.05,   turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'micro-b', smallBlind: 0.0001,  bigBlind: 0.0002,  minBuyIn: 0.01,  maxBuyIn: 0.08,   turnTimeoutMs: 45_000, isPremium: false },
-  // Low
-  { prefix: 'low-a',   smallBlind: 0.0002,  bigBlind: 0.0004,  minBuyIn: 0.02,  maxBuyIn: 0.20,   turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'low-b',   smallBlind: 0.0005,  bigBlind: 0.001,   minBuyIn: 0.05,  maxBuyIn: 0.50,   turnTimeoutMs: 45_000, isPremium: false },
-  // Mid
-  { prefix: 'mid-a',   smallBlind: 0.001,   bigBlind: 0.002,   minBuyIn: 0.10,  maxBuyIn: 1.00,   turnTimeoutMs: 30_000, isPremium: false },
-  { prefix: 'mid-b',   smallBlind: 0.002,   bigBlind: 0.004,   minBuyIn: 0.20,  maxBuyIn: 2.00,   turnTimeoutMs: 30_000, isPremium: false },
-  // High
-  { prefix: 'high-a',  smallBlind: 0.005,   bigBlind: 0.01,    minBuyIn: 0.50,  maxBuyIn: 5.00,   turnTimeoutMs: 15_000, isPremium: false },
+  // Micro — min buy-in 0.01 SOL
+  { prefix: 'micro-a', smallBlind: 0.001,   bigBlind: 0.002,   minBuyIn: 0.01,  maxBuyIn: 0.05,   turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'micro-b', smallBlind: 0.001,   bigBlind: 0.002,   minBuyIn: 0.01,  maxBuyIn: 0.08,   turnTimeoutMs: 45_000, isPremium: false },
+  // Low — min buy-in 0.05 SOL
+  { prefix: 'low-a',   smallBlind: 0.002,   bigBlind: 0.005,   minBuyIn: 0.05,  maxBuyIn: 0.25,   turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'low-b',   smallBlind: 0.002,   bigBlind: 0.005,   minBuyIn: 0.05,  maxBuyIn: 0.30,   turnTimeoutMs: 45_000, isPremium: false },
+  // Mid — min buy-in 0.8 SOL
+  { prefix: 'mid-a',   smallBlind: 0.008,   bigBlind: 0.016,   minBuyIn: 0.80,  maxBuyIn: 4.00,   turnTimeoutMs: 30_000, isPremium: false },
+  { prefix: 'mid-b',   smallBlind: 0.008,   bigBlind: 0.016,   minBuyIn: 0.80,  maxBuyIn: 5.00,   turnTimeoutMs: 30_000, isPremium: false },
+  // High — min buy-in 1.0 SOL
+  { prefix: 'high-a',  smallBlind: 0.01,    bigBlind: 0.02,    minBuyIn: 1.00,  maxBuyIn: 5.00,   turnTimeoutMs: 15_000, isPremium: false },
   { prefix: 'high-b',  smallBlind: 0.01,    bigBlind: 0.02,    minBuyIn: 1.00,  maxBuyIn: 10.00,  turnTimeoutMs: 15_000, isPremium: true  },
-  // VIP
+  // VIP — unchanged
   { prefix: 'vip-a',   smallBlind: 0.025,   bigBlind: 0.05,    minBuyIn: 2.50,  maxBuyIn: 25.00,  turnTimeoutMs: 15_000, isPremium: true  },
   { prefix: 'vip-b',   smallBlind: 0.05,    bigBlind: 0.1,     minBuyIn: 5.00,  maxBuyIn: 50.00,  turnTimeoutMs: 15_000, isPremium: true  },
 ];
@@ -104,9 +104,9 @@ function generateSolRooms(): RoomDef[] {
   }
   // Turbo tables (10s timer) — 6 tables across low/mid/high
   const turboTiers = [
-    { prefix: 'turbo-low',  sb: 0.0002, bb: 0.0004, min: 0.02,  max: 0.20,  count: 2 },
-    { prefix: 'turbo-mid',  sb: 0.001,  bb: 0.002,  min: 0.10,  max: 1.00,  count: 2 },
-    { prefix: 'turbo-high', sb: 0.005,  bb: 0.01,   min: 0.50,  max: 5.00,  count: 2 },
+    { prefix: 'turbo-low',  sb: 0.002,  bb: 0.005,  min: 0.05,  max: 0.25,  count: 2 },
+    { prefix: 'turbo-mid',  sb: 0.008,  bb: 0.016,  min: 0.80,  max: 4.00,  count: 2 },
+    { prefix: 'turbo-high', sb: 0.01,   bb: 0.02,   min: 1.00,  max: 5.00,  count: 2 },
   ];
   for (const t of turboTiers) {
     for (let i = 1; i <= t.count; i++) {
@@ -143,16 +143,21 @@ interface SeekerTier {
 }
 
 const SEEKER_TIERS: SeekerTier[] = [
-  { prefix: 'seeker-micro-a', smallBlind: 1n,    bigBlind: 2n,      minBuyIn: 100n,      maxBuyIn: 1_000n,     turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-micro-b', smallBlind: 2n,    bigBlind: 5n,      minBuyIn: 250n,      maxBuyIn: 2_500n,     turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-low-a',   smallBlind: 5n,    bigBlind: 10n,     minBuyIn: 500n,      maxBuyIn: 5_000n,     turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-low-b',   smallBlind: 10n,   bigBlind: 20n,     minBuyIn: 1_000n,    maxBuyIn: 10_000n,    turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-mid-a',   smallBlind: 25n,   bigBlind: 50n,     minBuyIn: 2_500n,    maxBuyIn: 25_000n,    turnTimeoutMs: 30_000, isPremium: false },
-  { prefix: 'seeker-mid-b',   smallBlind: 50n,   bigBlind: 100n,    minBuyIn: 5_000n,    maxBuyIn: 50_000n,    turnTimeoutMs: 30_000, isPremium: false },
-  { prefix: 'seeker-high-a',  smallBlind: 100n,  bigBlind: 200n,    minBuyIn: 10_000n,   maxBuyIn: 100_000n,   turnTimeoutMs: 15_000, isPremium: false },
-  { prefix: 'seeker-high-b',  smallBlind: 250n,  bigBlind: 500n,    minBuyIn: 25_000n,   maxBuyIn: 250_000n,   turnTimeoutMs: 15_000, isPremium: false },
-  { prefix: 'seeker-vip-a',   smallBlind: 500n,  bigBlind: 1_000n,  minBuyIn: 50_000n,   maxBuyIn: 500_000n,   turnTimeoutMs: 15_000, isPremium: true  },
-  { prefix: 'seeker-vip-b',   smallBlind: 1_000n,bigBlind: 2_000n,  minBuyIn: 100_000n,  maxBuyIn: 1_000_000n, turnTimeoutMs: 15_000, isPremium: true  },
+  // Micro — min 50 SEEKER (very low friction)
+  { prefix: 'seeker-micro-a', smallBlind: 1n,    bigBlind: 2n,      minBuyIn: 50n,       maxBuyIn: 500n,       turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-micro-b', smallBlind: 1n,    bigBlind: 2n,      minBuyIn: 50n,       maxBuyIn: 800n,       turnTimeoutMs: 45_000, isPremium: false },
+  // Low — min 200 SEEKER
+  { prefix: 'seeker-low-a',   smallBlind: 2n,    bigBlind: 5n,      minBuyIn: 200n,      maxBuyIn: 2_000n,     turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-low-b',   smallBlind: 2n,    bigBlind: 5n,      minBuyIn: 200n,      maxBuyIn: 2_500n,     turnTimeoutMs: 45_000, isPremium: false },
+  // Mid — min 1000 SEEKER
+  { prefix: 'seeker-mid-a',   smallBlind: 10n,   bigBlind: 20n,     minBuyIn: 1_000n,    maxBuyIn: 10_000n,    turnTimeoutMs: 30_000, isPremium: false },
+  { prefix: 'seeker-mid-b',   smallBlind: 10n,   bigBlind: 20n,     minBuyIn: 1_000n,    maxBuyIn: 15_000n,    turnTimeoutMs: 30_000, isPremium: false },
+  // High — min 5000 SEEKER
+  { prefix: 'seeker-high-a',  smallBlind: 50n,   bigBlind: 100n,    minBuyIn: 5_000n,    maxBuyIn: 50_000n,    turnTimeoutMs: 15_000, isPremium: false },
+  { prefix: 'seeker-high-b',  smallBlind: 50n,   bigBlind: 100n,    minBuyIn: 5_000n,    maxBuyIn: 75_000n,    turnTimeoutMs: 15_000, isPremium: false },
+  // VIP — min 25K SEEKER
+  { prefix: 'seeker-vip-a',   smallBlind: 250n,  bigBlind: 500n,    minBuyIn: 25_000n,   maxBuyIn: 250_000n,   turnTimeoutMs: 15_000, isPremium: true  },
+  { prefix: 'seeker-vip-b',   smallBlind: 500n,  bigBlind: 1_000n,  minBuyIn: 50_000n,   maxBuyIn: 500_000n,   turnTimeoutMs: 15_000, isPremium: true  },
 ];
 
 // Distribution: 50 SEEKER tables
@@ -166,9 +171,9 @@ const SEEKER_DISTRIBUTION: Record<string, number> = {
 
 // Turbo SEEKER tables: 5 tables
 const SEEKER_TURBO = [
-  { prefix: 'seeker-turbo-low',  sb: 5n,   bb: 10n,   min: 500n,    max: 5_000n,   count: 2 },
-  { prefix: 'seeker-turbo-mid',  sb: 25n,  bb: 50n,   min: 2_500n,  max: 25_000n,  count: 2 },
-  { prefix: 'seeker-turbo-high', sb: 100n, bb: 200n,  min: 10_000n, max: 100_000n, count: 1 },
+  { prefix: 'seeker-turbo-low',  sb: 2n,   bb: 5n,    min: 200n,    max: 2_000n,   count: 2 },
+  { prefix: 'seeker-turbo-mid',  sb: 10n,  bb: 20n,   min: 1_000n,  max: 10_000n,  count: 2 },
+  { prefix: 'seeker-turbo-high', sb: 50n,  bb: 100n,  min: 5_000n,  max: 50_000n,  count: 1 },
 ];
 
 function generateSeekerRooms(): RoomDef[] {
