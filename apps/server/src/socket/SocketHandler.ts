@@ -402,6 +402,9 @@ export function registerSocketHandlers(
       const room = roomManager.getRoom(payload.tableId);
       if (!room) return;
 
+      // Emoji reactions are seeker-room only
+      if (room.tokenType !== 'SEEKER') return;
+
       // Must be seated at the table
       const seatIndex = room['socketToSeat'].get(socket.id);
       if (seatIndex === undefined) return;

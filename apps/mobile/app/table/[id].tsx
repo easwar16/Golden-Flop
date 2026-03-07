@@ -1875,14 +1875,14 @@ export default function TableScreen() {
                     onAction={handleAction}
                   />
                 </View>
-                <EmojiPanel onSend={(emoji) => SocketService.sendEmojiReaction(id, emoji)} />
+                {isSeeker && <EmojiPanel onSend={(emoji) => SocketService.sendEmojiReaction(id, emoji)} />}
               </View>
             </>
-          ) : (
+          ) : isSeeker ? (
             <View style={styles.emojiOnly}>
               <EmojiPanel onSend={(emoji) => SocketService.sendEmojiReaction(id, emoji)} />
             </View>
-          )}
+          ) : null}
         </View>
       )}
     </View>
