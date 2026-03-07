@@ -87,6 +87,7 @@ export interface TableStatePayload {
   minBuyIn: number;
   maxBuyIn: number;
   reservedSeats?: ReservedSeatInfo[];
+  tokenType?: 'SOL' | 'SEEKER';
 }
 
 export interface PlayerShowdownResult {
@@ -138,6 +139,7 @@ interface NetworkSlice {
   minBuyIn: number;
   maxBuyIn: number;
   reservedSeats: ReservedSeatInfo[];
+  tokenType: 'SOL' | 'SEEKER' | null;
 }
 
 export interface EmojiReactionInfo {
@@ -211,6 +213,7 @@ const defaultNetworkSlice: NetworkSlice = {
   minBuyIn: 0,
   maxBuyIn: 0,
   reservedSeats: [],
+  tokenType: null,
 };
 
 const defaultUISlice: UISlice = {
@@ -260,6 +263,7 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         minBuyIn: payload.minBuyIn,
         maxBuyIn: payload.maxBuyIn,
         reservedSeats: payload.reservedSeats ?? [],
+        tokenType: payload.tokenType ?? null,
         isJoining: false,
         // Reset raise amount to min on each new state if it's our turn
         raiseAmount: payload.isMyTurn ? Math.min(payload.minRaise, payload.maxRaise) : get().raiseAmount,

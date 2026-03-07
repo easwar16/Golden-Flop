@@ -1305,8 +1305,9 @@ export default function TableScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const tokenType = useGameStore((s) => s.tokenType);
   const isPractice = id.startsWith('practice-');
-  const isSeeker = id.startsWith('seeker-');
+  const isSeeker = tokenType === 'SEEKER' || (!tokenType && id.startsWith('seeker-'));
   const fmtValue = useMemo(() => getFormatter(isPractice, isSeeker), [isPractice, isSeeker]);
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
@@ -1560,8 +1561,8 @@ export default function TableScreen() {
           minBuyIn={tablMinBuyIn || 10_000_000}
           maxBuyIn={tablMaxBuyIn || 100_000_000}
           onClose={closeBuyIn}
-          isPractice={id.startsWith('practice-')}
-          tokenType={id.startsWith('seeker-') ? 'SEEKER' : 'SOL'}
+          isPractice={isPractice}
+          tokenType={isSeeker ? 'SEEKER' : 'SOL'}
         />
       )}
 
