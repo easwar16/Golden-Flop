@@ -586,6 +586,9 @@ export class Room {
     const canAct = this.handState.players.filter(p => !p.isFolded && !p.isAllIn);
     if (canAct.length <= 1) {
       // All-in runout: no meaningful betting possible (0 or 1 player can act).
+      // Clear active player so clients don't show timer/glow.
+      this.handState.activePlayerIndex = -1;
+      this.clearTurnTimer();
       // Show the current street then advance automatically.
       this.broadcastState();
       setTimeout(() => {

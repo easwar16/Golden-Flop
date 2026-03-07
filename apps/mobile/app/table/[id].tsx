@@ -369,7 +369,7 @@ const slotStyles = StyleSheet.create({
     textAlign: 'center',
   },
   chips: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#00FF88',
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#00FF88',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
     textAlign: 'center',
   },
@@ -898,6 +898,7 @@ function SweepLabel({ x, y, text, color, fontSize, delay, holdMs, onDone }: {
       textAlign: 'center',
       fontFamily: 'PressStart2P_400Regular',
       fontSize,
+      lineHeight: fontSize * 2,
       color,
       textShadowColor: 'rgba(0,0,0,0.9)',
       textShadowOffset: { width: 0, height: 2 },
@@ -1019,7 +1020,7 @@ const WinPopup = memo(function WinPopup({ winnerName, handName, bestHandCards, w
       <Text style={{
         fontFamily: 'PressStart2P_400Regular',
         fontSize: 8,
-        lineHeight: 16,
+        lineHeight: 20,
         color: gold,
         marginBottom: 6,
       }}>
@@ -1069,9 +1070,9 @@ const pbStyles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: 'rgba(81,46,123,0.92)',
     borderWidth: 1, borderColor: gold, borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 3, marginBottom: 6,
+    paddingHorizontal: 14, paddingVertical: 5, marginBottom: 6,
   },
-  text: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 1 },
+  text: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold, letterSpacing: 1, textAlign: 'center' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1124,7 +1125,7 @@ const PotDisplay = memo(function PotDisplay({
 
 const potStyles = StyleSheet.create({
   wrap: {
-    alignItems: 'center', gap: 3, marginBottom: 8,
+    alignItems: 'center', gap: 3, marginBottom: 14,
   },
   coinRow: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
@@ -1134,7 +1135,7 @@ const potStyles = StyleSheet.create({
     width: COIN_SIZE, height: COIN_SIZE,
   },
   label: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: gold,
     textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
 });
@@ -1358,6 +1359,7 @@ export default function TableScreen() {
   // Check if the local player is sitting out
   const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
   const iAmSittingOut = mySeat?.isSittingOut ?? false;
+  const iAmAllIn = mySeat?.isAllIn ?? false;
 
   const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
   const turnTimeoutMs = useGameStore((s) => s.turnTimeoutMs);
@@ -1668,7 +1670,7 @@ export default function TableScreen() {
 
       {/* Top bar */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        {secondsLeft > 0 && (
+        {secondsLeft > 0 && activePlayerSeatIndex !== null && (
           <View style={[styles.turnTimerWrap, secondsLeft <= 5 && styles.turnTimerWrapUrgent]}>
             <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
               {secondsLeft}s
@@ -1855,7 +1857,7 @@ export default function TableScreen() {
               onPress={() => SocketService.returnToTable(id)}>
               <Text style={styles.imBackText}>I'M BACK</Text>
             </Pressable>
-          ) : isMyTurn ? (
+          ) : isMyTurn && !iAmAllIn ? (
             <>
               <View style={styles.raiseRow}>
                 <RaiseAmountInput
@@ -1906,11 +1908,11 @@ const styles = StyleSheet.create({
     left: 0, right: 0,
     alignItems: 'center', justifyContent: 'center',
   },
-  communityRow: { flexDirection: 'row', justifyContent: 'center', gap: 4 },
-  communitySlot: { width: 46, alignItems: 'center', justifyContent: 'center' },
-  cardSize: { width: 44, height: 62 },
+  communityRow: { flexDirection: 'row', justifyContent: 'center', gap: 2 },
+  communitySlot: { width: 56, alignItems: 'center', justifyContent: 'center' },
+  cardSize: { width: 54, height: 76 },
   emptyCard: {
-    width: 44, height: 62, borderRadius: 6,
+    width: 54, height: 76, borderRadius: 6,
     backgroundColor: 'rgba(0,0,0,0.28)',
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.55)',
     ...Platform.select({
@@ -1989,8 +1991,8 @@ const styles = StyleSheet.create({
     color: '#FF4444',
     textShadowColor: '#FF4444',
   },
-  holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
-  holeCard: { width: 52, height: 74 },
+  holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 4, marginTop: 24 },
+  holeCard: { width: 64, height: 90 },
   bustedBanner: {
     backgroundColor: 'rgba(26,10,46,0.92)',
     borderWidth: 2, borderColor: '#FF4444', borderRadius: 14,
