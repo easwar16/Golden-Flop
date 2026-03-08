@@ -42,6 +42,10 @@ COPY --from=builder /app/apps/server/prisma ./apps/server/prisma
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 
+# Copy entrypoint script
+COPY apps/server/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Expose the server port
 EXPOSE 4010
 
@@ -49,4 +53,4 @@ EXPOSE 4010
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://localhost:4010/health || exit 1
 
-CMD ["node", "apps/server/dist/index.js"]
+ENTRYPOINT ["/app/entrypoint.sh"]
