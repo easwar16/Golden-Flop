@@ -1,5 +1,5 @@
 # ── Stage 1: Install & Build ──────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ RUN cd apps/server && npx prisma generate
 RUN npx turbo run build --filter=@goldenflop/server...
 
 # ── Stage 2: Production ──────────────────────────────────────────────────────
-FROM node:22-alpine AS runner
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
