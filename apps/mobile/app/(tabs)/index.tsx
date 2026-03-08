@@ -137,6 +137,7 @@ export default function HomeScreen() {
           resizeMode="cover"
         />
       </Pressable>
+
     </View>
   );
 }

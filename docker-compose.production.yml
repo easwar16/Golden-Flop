@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: goldenflop-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=goldenflop
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=goldenflop
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goldenflop"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: goldenflop-redis
+    restart: always
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    image: ${DOCKERHUB_IMAGE_PREFIX}-server:${IMAGE_TAG}
+    container_name: goldenflop-server
+    restart: always
+    ports:
+      - "${PORT:-4010}:${PORT:-4010}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-4010}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
+      - SOLANA_NETWORK=${SOLANA_NETWORK}
+      - TREASURY_WALLET=${TREASURY_WALLET}
+      - SEEKER_MINT=${SEEKER_MINT}
+      - VAULT_PRIVATE_KEY=${VAULT_PRIVATE_KEY}
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-4010}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:

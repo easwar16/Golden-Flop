@@ -57,19 +57,21 @@ type Tier = { label: string; accentColor: string; borderColor: string; shadowCol
 
 function getTier(bigBlind: number): Tier {
   const bb = bigBlind / LAMPORTS_PER_SOL;
-  if (bb <= 0.001)  return { label: 'LOW',  accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',  shadowColor: '#00FFFF', isVip: false };
-  if (bb <= 0.005)  return { label: 'MID',  accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',  shadowColor: '#FFD700', isVip: false };
-  if (bb <= 0.02)   return { label: 'HIGH', accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)', shadowColor: '#FF3B6F', isVip: false };
-  return                     { label: 'VIP',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)', shadowColor: '#BF5FFF', isVip: true  };
+  if (bb <= 0.002)  return { label: 'MICRO', accentColor: '#7FFFD4', borderColor: 'rgba(127,255,212,0.55)', shadowColor: '#7FFFD4', isVip: false };
+  if (bb <= 0.005)  return { label: 'LOW',   accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false };
+  if (bb <= 0.016)  return { label: 'MID',   accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false };
+  if (bb <= 0.02)   return { label: 'HIGH',  accentColor: '#FF3B6F', borderColor: 'rgba(255,59,111,0.75)',  shadowColor: '#FF3B6F', isVip: false };
+  return                     { label: 'VIP',   accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  };
 }
 
 // ─── Table name per tier ──────────────────────────────────────────────────────
 
 const TIER_NAMES: Record<string, string[]> = {
-  LOW:  ['PIXEL PARADISE', 'NEON ALLEY',    'COIN CORNER',   'STARTER DECK',  'LUCKY LANE',    'COPPER CHIP',   'SILVER SPARK',  'ROOKIE ROOM'],
-  MID:  ['GOLDEN TABLE',   'VELVET ROOM',   'DIAMOND LOUNGE','HIGH STREET',   'AMBER HALL',    'JADE TERRACE',  'CRYSTAL CLUB',  'EMBER LOUNGE'],
-  HIGH: ['ROYAL FLUSH',    'IRON THRONE',   'PRESTIGE ROOM', 'THE PENTHOUSE', 'OBSIDIAN ROOM', 'SCARLET SUITE'],
-  VIP:  ['ACE HIGH',       'CROWN JEWELS',  'PLATINUM SUITE','INFINITY TABLE'],
+  MICRO:['PENNY LANE',     'DUST BOWL',     'ROOKIE PIT',    'TINY TABLE',    'COPPER POT',    'FIRST STEPS',   'CHIP STARTER',  'NANO ROOM',     'SMALL FRY',    'PIXEL DUST'],
+  LOW:  ['PIXEL PARADISE', 'NEON ALLEY',    'COIN CORNER',   'STARTER DECK',  'LUCKY LANE',    'COPPER CHIP',   'SILVER SPARK',  'ROOKIE ROOM',   'BRONZE GATE',  'GREEN FELT'],
+  MID:  ['GOLDEN TABLE',   'VELVET ROOM',   'DIAMOND LOUNGE','HIGH STREET',   'AMBER HALL',    'JADE TERRACE',  'CRYSTAL CLUB',  'EMBER LOUNGE',  'SAPPHIRE DEN', 'RUBY ROOM'],
+  HIGH: ['ROYAL FLUSH',    'IRON THRONE',   'PRESTIGE ROOM', 'THE PENTHOUSE', 'OBSIDIAN ROOM', 'SCARLET SUITE', 'TITAN TABLE',   'DRAGON DEN',    'INFERNO ROOM', 'BLAZE HALL'],
+  VIP:  ['ACE HIGH',       'CROWN JEWELS',  'PLATINUM SUITE','INFINITY TABLE','DIAMOND VAULT', 'CELESTIAL ROOM'],
 };
 
 const tierTableCounts: Record<string, number> = {};
@@ -107,6 +109,7 @@ function getTableBadge(t: LobbyTable, allTables: LobbyTable[]): TableBadge {
 // ─── Table speed ──────────────────────────────────────────────────────────────
 
 function getTableSpeed(turnTimeoutMs: number): string {
+  if (turnTimeoutMs <= 10_000) return 'TURBO';
   if (turnTimeoutMs <= 15_000) return 'FAST';
   if (turnTimeoutMs <= 30_000) return 'NORMAL';
   return 'SLOW';
@@ -216,37 +219,62 @@ function BuyInModal({ visible, tableName, tier, minBuyIn, maxBuyIn, amount, onCh
 
 // ─── Practice tier mapping ────────────────────────────────────────────────────
 
-const PRACTICE_TIERS: Record<string, Tier> = {
-  'practice-beginner':    { label: 'EASY',    accentColor: '#22c55e', borderColor: 'rgba(34,197,94,0.55)',   shadowColor: '#22c55e', isVip: false },
-  'practice-casual':      { label: 'FUN',     accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false },
-  'practice-advanced':    { label: 'INTENSE', accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false },
-  'practice-highroller':  { label: 'VIP',     accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  },
-};
-
 function getPracticeTier(tableId: string): Tier {
-  return PRACTICE_TIERS[tableId] ?? { label: 'FUN', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false };
+  if (tableId.startsWith('practice-beginner'))   return { label: 'EASY',    accentColor: '#22c55e', borderColor: 'rgba(34,197,94,0.55)',   shadowColor: '#22c55e', isVip: false };
+  if (tableId.startsWith('practice-casual'))     return { label: 'FUN',     accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)',   shadowColor: '#00FFFF', isVip: false };
+  if (tableId.startsWith('practice-advanced'))   return { label: 'INTENSE', accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: false };
+  if (tableId.startsWith('practice-highroller')) return { label: 'VIP',     accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.85)',  shadowColor: '#BF5FFF', isVip: true  };
+  if (tableId.startsWith('practice-turbo'))      return { label: 'TURBO',   accentColor: '#FF6B35', borderColor: 'rgba(255,107,53,0.65)',  shadowColor: '#FF6B35', isVip: false };
+  if (tableId.startsWith('practice-headsup'))    return { label: '1v1',     accentColor: '#00E5FF', borderColor: 'rgba(0,229,255,0.55)',   shadowColor: '#00E5FF', isVip: false };
+  return { label: 'FUN', accentColor: '#00FFFF', borderColor: 'rgba(0,255,255,0.55)', shadowColor: '#00FFFF', isVip: false };
 }
 
-const PRACTICE_NAMES: Record<string, string> = {
-  'practice-beginner':   'BEGINNER TABLE',
-  'practice-casual':     'CASUAL LOUNGE',
-  'practice-advanced':   'ADVANCED ROOM',
-  'practice-highroller': 'HIGH ROLLER',
-};
+function getPracticeName(tableId: string): string {
+  if (tableId.startsWith('practice-beginner'))   return 'BEGINNER TABLE';
+  if (tableId.startsWith('practice-casual'))     return 'CASUAL LOUNGE';
+  if (tableId.startsWith('practice-advanced'))   return 'ADVANCED ROOM';
+  if (tableId.startsWith('practice-highroller')) return 'HIGH ROLLER';
+  if (tableId.startsWith('practice-turbo'))      return 'TURBO PRACTICE';
+  if (tableId.startsWith('practice-headsup'))    return 'HEADS UP';
+  return tableId;
+}
 
 // ─── SEEKER tier mapping ──────────────────────────────────────────────────────
 
 function getSeekerTier(bigBlind: number): Tier {
-  if (bigBlind <= 10)   return { label: 'LOW',  accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.55)',  shadowColor: '#BF5FFF', isVip: false };
-  if (bigBlind <= 50)   return { label: 'MID',  accentColor: '#9B30FF', borderColor: 'rgba(155,48,255,0.75)',  shadowColor: '#9B30FF', isVip: false };
-  return                        { label: 'HIGH', accentColor: '#7B1FA2', borderColor: 'rgba(123,31,162,0.75)', shadowColor: '#7B1FA2', isVip: false };
+  if (bigBlind <= 2)    return { label: 'MICRO', accentColor: '#CE93D8', borderColor: 'rgba(206,147,216,0.55)', shadowColor: '#CE93D8', isVip: false };
+  if (bigBlind <= 5)    return { label: 'LOW',   accentColor: '#BF5FFF', borderColor: 'rgba(191,95,255,0.55)',  shadowColor: '#BF5FFF', isVip: false };
+  if (bigBlind <= 20)   return { label: 'MID',   accentColor: '#E040FB', borderColor: 'rgba(224,64,251,0.65)',  shadowColor: '#E040FB', isVip: false };
+  if (bigBlind <= 100)  return { label: 'HIGH',  accentColor: '#FF6BF0', borderColor: 'rgba(255,107,240,0.65)', shadowColor: '#FF6BF0', isVip: false };
+  return                         { label: 'VIP',   accentColor: '#FFD700', borderColor: 'rgba(255,215,0,0.75)',   shadowColor: '#FFD700', isVip: true  };
 }
 
-const SEEKER_NAMES: Record<string, string> = {
-  'seeker-low-1':  'SEEKER LOUNGE',
-  'seeker-mid-1':  'SEEKER ARENA',
-  'seeker-high-1': 'SEEKER VAULT',
-};
+const SEEKER_TIER_NAMES: string[][] = [
+  ['SEEKER PIT', 'SEEKER NEST', 'SEEKER COVE', 'SEEKER DEN', 'SEEKER NOOK', 'SEEKER BURROW', 'SEEKER HOLLOW', 'SEEKER CREEK'],
+  ['SEEKER LOUNGE', 'SEEKER GROVE', 'SEEKER MEADOW', 'SEEKER GARDEN', 'SEEKER OASIS', 'SEEKER PLAZA', 'SEEKER COURT', 'SEEKER TERRACE'],
+  ['SEEKER ARENA', 'SEEKER FORGE', 'SEEKER TOWER', 'SEEKER CITADEL', 'SEEKER BASTION', 'SEEKER SANCTUM', 'SEEKER KEEP', 'SEEKER HALL'],
+  ['SEEKER VAULT', 'SEEKER SUMMIT', 'SEEKER PEAK', 'SEEKER APEX', 'SEEKER ZENITH', 'SEEKER SPIRE'],
+  ['SEEKER THRONE', 'SEEKER CROWN', 'SEEKER DYNASTY', 'SEEKER EMPIRE', 'SEEKER DOMINION'],
+];
+
+function getSeekerTierIndex(bigBlind: number): number {
+  if (bigBlind <= 2)   return 0; // micro
+  if (bigBlind <= 5)   return 1; // low
+  if (bigBlind <= 20)  return 2; // mid
+  if (bigBlind <= 100) return 3; // high
+  return 4;                       // vip
+}
+
+function computeSeekerNames(tables: { bigBlind: number }[]): string[] {
+  const counters: Record<number, number> = {};
+  return tables.map((t) => {
+    const idx = getSeekerTierIndex(t.bigBlind);
+    const names = SEEKER_TIER_NAMES[idx];
+    const count = counters[idx] ?? 0;
+    counters[idx] = count + 1;
+    return names[count % names.length];
+  });
+}
 
 function formatSeeker(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
@@ -383,9 +411,9 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
           </Reanimated.View>
 
           <View style={styles.tableCardBody}>
-            {/* Name row */}
+            {/* Name + copy */}
             <View style={styles.tableNameRow}>
-              <Text style={styles.tableName} numberOfLines={1}>{name}</Text>
+              <Text style={styles.tableName}>{name}</Text>
               <Pressable
                 onPress={(e) => {
                   e.stopPropagation?.();
@@ -393,34 +421,18 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
                 }}
                 hitSlop={8}
                 style={({ pressed }) => [styles.copyIdBtn, pressed && { opacity: 0.5 }]}>
-                <MaterialCommunityIcons name="content-copy" size={12} color="rgba(255,255,255,0.4)" />
+                <MaterialCommunityIcons name="content-copy" size={14} color="rgba(255,255,255,0.4)" />
               </Pressable>
-              <View style={[styles.tierBadge, { borderColor: tier.accentColor, backgroundColor: tier.accentColor + '22' }]}>
-                <Text style={[styles.tierBadgeText, { color: tier.accentColor }]}>{tier.label}</Text>
-              </View>
-              {isPractice && (
-                <View style={[styles.tableBadge, { borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)' }]}>
-                  <Text style={[styles.tableBadgeText, { color: '#22c55e' }]}>FREE CHIPS</Text>
-                </View>
-              )}
-              {isSeeker && (
-                <View style={[styles.tableBadge, { borderColor: '#BF5FFF', backgroundColor: 'rgba(191,95,255,0.15)' }]}>
-                  <Text style={[styles.tableBadgeText, { color: '#BF5FFF' }]}>SEEKER</Text>
-                </View>
-              )}
-              {!isPractice && badge && (
-                <View style={[styles.tableBadge, { borderColor: badge.color, backgroundColor: badge.color + '22' }]}>
-                  <Text style={[styles.tableBadgeText, { color: badge.color }]}>{badge.text}</Text>
-                </View>
-              )}
             </View>
 
-            <Text style={styles.tableDetail}>
-              {isPractice
-                ? `Blinds: ${t.smallBlind}/${t.bigBlind} chips`
-                : isSeeker
-                ? `Blinds: ${formatSeeker(t.smallBlind)} / ${formatSeeker(t.bigBlind)} SEEKER`
-                : `Blinds: ${(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / ${(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL`}
+            <Text style={styles.tableDetailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+              Blinds: <Text style={styles.tableDetailNum}>
+                {isPractice
+                  ? `${t.smallBlind}/${t.bigBlind} chips`
+                  : isSeeker
+                  ? `${formatSeeker(t.smallBlind)} / ${formatSeeker(t.bigBlind)} SEEKER`
+                  : `${(t.smallBlind / LAMPORTS_PER_SOL).toFixed(4)} / ${(t.bigBlind / LAMPORTS_PER_SOL).toFixed(4)} SOL`}
+              </Text>
             </Text>
 
             <View style={styles.tableRow}>
@@ -430,13 +442,19 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </Text>
             </View>
 
-            <Text style={styles.tableDetail}>
-              {isPractice
-                ? `Start: ${t.minBuyIn.toLocaleString()} chips`
-                : isSeeker
-                ? `Min buy-in: ${formatSeeker(t.minBuyIn)} SEEKER`
-                : `Min buy-in: ${(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL`}
+            <Text style={styles.tableDetailLabel}>
+              {isPractice ? 'Start: ' : 'Buy-in: '}<Text style={styles.tableDetailNum}>
+                {isPractice
+                  ? `${t.minBuyIn.toLocaleString()} chips`
+                  : isSeeker
+                  ? `${formatSeeker(t.minBuyIn)} SEEKER`
+                  : `${(t.minBuyIn / LAMPORTS_PER_SOL).toFixed(2)} SOL`}
+              </Text>
             </Text>
+
+            {!expanded && (
+              <Text style={styles.tapHint}>Tap for more details</Text>
+            )}
 
             {expanded && (
               <View style={styles.expandedBlock}>
@@ -454,25 +472,40 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
                   <Text style={styles.expandedLabel}>SEATS LEFT</Text>
                   <Text style={styles.expandedValue}>{(t.maxPlayers ?? MAX_PLAYERS) - t.playerCount}</Text>
                 </View>
-                <Pressable onPress={onShowDetails} style={styles.detailsBtn}>
-                  <Text style={styles.detailsBtnText}>ROOM INFO</Text>
-                </Pressable>
               </View>
             )}
           </View>
 
-          <Pressable
-            style={[styles.joinBtn, styles.joinBtnWrap, isWarm && styles.joinBtnWarm, isHot && styles.joinBtnHot, isPressed && styles.joinBtnPressed]}
-            onPressIn={() => onPressIn(t.id)}
-            onPressOut={onPressOut}
-            onPress={(e) => { e.stopPropagation?.(); onPressOut(); onJoinPress(t); }}>
-            <ImageBackground
-              source={isPressed ? require('@/assets/images/buttons/join-btn-pressed.png') : require('@/assets/images/buttons/join-btn.png')}
-              style={styles.joinBtnBg}
-              resizeMode="stretch">
-              <Text style={styles.joinBtnText}>JOIN</Text>
-            </ImageBackground>
-          </Pressable>
+          <View style={styles.cardRight}>
+            <View style={styles.badgeRow}>
+              <View style={[styles.tierBadge, { borderColor: tier.accentColor, backgroundColor: tier.accentColor + '22' }]}>
+                <Text style={[styles.tierBadgeText, { color: tier.accentColor }]}>{tier.label}</Text>
+              </View>
+              {isPractice && (
+                <View style={[styles.tableBadge, { borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                  <Text style={[styles.tableBadgeText, { color: '#22c55e' }]}>FREE</Text>
+                </View>
+              )}
+              {!isPractice && badge && (
+                <View style={[styles.tableBadge, { borderColor: badge.color, backgroundColor: badge.color + '22' }]}>
+                  <Text style={[styles.tableBadgeText, { color: badge.color }]}>{badge.text}</Text>
+                </View>
+              )}
+            </View>
+            <Pressable
+              style={[styles.joinBtn, styles.joinBtnWrap, isWarm && styles.joinBtnWarm, isHot && styles.joinBtnHot, isPressed && styles.joinBtnPressed]}
+              onPressIn={() => onPressIn(t.id)}
+              onPressOut={onPressOut}
+              onPress={(e) => { e.stopPropagation?.(); onPressOut(); onJoinPress(t); }}>
+              <ImageBackground
+                source={isPressed ? require('@/assets/images/buttons/join-btn-pressed.png') : require('@/assets/images/buttons/join-btn.png')}
+                style={styles.joinBtnBg}
+                resizeMode="stretch">
+                <Text style={styles.joinBtnText}>JOIN</Text>
+              </ImageBackground>
+            </Pressable>
+          </View>
+
         </View>
       </Pressable>
     </Reanimated.View>
@@ -672,6 +705,15 @@ export default function LobbyScreen() {
 
   const [solBalance, setSolBalance] = useState<string | null>(null);
   const [seekerBalance, setSeekerBalance] = useState<string | null>(null);
+  const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
+  useFocusEffect(useCallback(() => {
+    setBalanceRefreshKey((k) => k + 1);
+  }, []));
+
+  // Table category memos — must be declared before the balance effect that references seekerTables
+  const solTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType !== 'SEEKER'), [tables]);
+  const seekerTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType === 'SEEKER'), [tables]);
+
   useEffect(() => {
     if (!addressBase58) { setSolBalance(null); setSeekerBalance(null); return; }
     let cancelled = false;
@@ -687,7 +729,7 @@ export default function LobbyScreen() {
           const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
           const seekerMintStr = seekerTables.length > 0
             ? await (async () => {
-                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001'}/api/vault/${seekerTables[0].id}/address`);
+                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010'}/api/vault/${seekerTables[0].id}/address`);
                 if (!res.ok) return null;
                 const data = await res.json() as { seekerMint?: string };
                 return data.seekerMint ?? null;
@@ -712,12 +754,8 @@ export default function LobbyScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [addressBase58, deauthorize, signOut, seekerTables]);
+  }, [addressBase58, deauthorize, signOut, seekerTables, balanceRefreshKey]);
 
-  // Table names are computed once per render cycle; reset counter first
-  // Only compute for non-practice tables (practice tables use PRACTICE_NAMES)
-  const solTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType !== 'SEEKER'), [tables]);
-  const seekerTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType === 'SEEKER'), [tables]);
   const tableNames = useMemo(() => {
     const counts: Record<string, number> = {};
     return solTables.map((t) => {
@@ -731,6 +769,7 @@ export default function LobbyScreen() {
   }, [solTables]);
 
   const handleJoin = useCallback(async (tableId: string) => {
+    SocketService.leaveLobby();
     await showTransition();
     router.push(`/table/${tableId}`);
   }, [showTransition, router]);
@@ -791,6 +830,7 @@ export default function LobbyScreen() {
     if (!tableId) return;
     const err = await SocketService.joinTable(tableId, min, getPlayerName());
     if (err) { console.warn('[lobby] joinTable after create error:', err); return; }
+    SocketService.leaveLobby();
     router.push(`/table/${tableId}`);
   };
 
@@ -801,14 +841,15 @@ export default function LobbyScreen() {
         .filter((t) => t.isPractice)
         .map((t) => ({
           t,
-          name: PRACTICE_NAMES[t.id] ?? t.name,
+          name: getPracticeName(t.id),
           tier: getPracticeTier(t.id),
         }));
     }
 
     if (activeTab === 'SEEKER') {
+      const seekerNames = computeSeekerNames(seekerTables);
       let list = seekerTables
-        .map((t) => ({ t, name: SEEKER_NAMES[t.id] ?? t.name, tier: getSeekerTier(t.bigBlind) }));
+        .map((t, i) => ({ t, name: seekerNames[i], tier: getSeekerTier(t.bigBlind) }));
 
       if (joinableOnly) list = list.filter(({ t }) => t.playerCount < (t.maxPlayers ?? MAX_PLAYERS));
 
@@ -1105,7 +1146,7 @@ const styles = StyleSheet.create({
 
   // Table card
   tableCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between',
     backgroundColor: panelBg, borderRadius: 16, borderWidth: 2, padding: 14, overflow: 'hidden',
   },
   vipRim: {
@@ -1122,24 +1163,32 @@ const styles = StyleSheet.create({
     width: 200,
   },
   tableCardBody: { flex: 1, minWidth: 0, gap: 5 },
-  tableNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  tableName: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 12 : 10, color: gold, letterSpacing: 0.5, flexShrink: 1 },
-  copyIdBtn: { padding: 4 },
-  tierBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 5 },
-  tierBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, letterSpacing: 0.5 },
-  tableBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 5 },
-  tableBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, letterSpacing: 0.3 },
-  tableDetail: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.9)' },
+  cardRight: { alignItems: 'center', gap: 8, marginLeft: 10 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginBottom: 2 },
+  tableNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2, flexWrap: 'nowrap' },
+  tableName: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 14 : 12, color: gold, letterSpacing: 0.5, flexShrink: 1, minWidth: 0 },
+  copyIdBtn: { padding: 4, marginBottom: 8},
+  tierBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
+  tierBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, letterSpacing: 0.5 },
+  tableBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
+  tableBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, letterSpacing: 0.3 },
+  tableDetail: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.9)' },
+  tableDetailLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FFFF', marginBottom: 2 },
+  tableDetailNum: { fontSize: 8, color: 'rgba(255,255,255,0.9)' },
   tableDetailHot: { color: '#FF9A6C' },
-  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 7 , marginBottom: 2},
+  statusDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 5},
+  tapHint: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
   expandedBlock: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', gap: 5 },
   expandedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  expandedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.5)' },
-  expandedValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.9)' },
+  expandedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FFFF' },
+  expandedValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.95)' },
   detailsBtn: {
-    marginTop: 4, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 10,
+    paddingVertical: 5, paddingHorizontal: 10,
     borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,215,0,0.4)', backgroundColor: 'rgba(255,215,0,0.08)',
+  },
+  detailsBtnRow: {
+    width: '100%', alignItems: 'flex-end', marginTop: 4,
   },
   detailsBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 0.5 },
 

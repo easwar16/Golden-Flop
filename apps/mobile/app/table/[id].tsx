@@ -56,6 +56,8 @@ import * as Clipboard from 'expo-clipboard';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PokerCard, type CardMagnifyInfo } from '@/components/poker/poker-card';
 import { GameActionButtons } from '@/components/poker/GameActionButtons';
+import { EmojiReaction } from '@/components/poker/EmojiReaction';
+import { EmojiPanel } from '@/components/poker/EmojiPanel';
 import PixelAvatar from '@/components/PixelAvatar';
 import DealingCards from '@/components/animations/DealingCards';
 import type { CardValue } from '@/constants/poker';
@@ -185,6 +187,7 @@ const SeatSlot = memo(function SeatSlot({
 }: SeatSlotProps) {
   // Read only this seat from the store to prevent re-renders when other seats change
   const seat = useGameStore((s) => s.seats[seatIndex]);
+  const emojiReaction = useGameStore((s) => s.emojiReactions[seatIndex]);
   const myAvatarSeed = useUserStore((s) => s.avatarSeed);
   const myUsername = useUserStore((s) => s.username);
 
@@ -229,6 +232,11 @@ const SeatSlot = memo(function SeatSlot({
         <View style={slotStyles.dealerBadge}>
           <Text style={slotStyles.dealerText}>D</Text>
         </View>
+      )}
+
+      {/* Emoji reaction */}
+      {emojiReaction && (
+        <EmojiReaction emoji={emojiReaction.emoji} id={emojiReaction.id} />
       )}
 
       {/* + join badge on empty seats only */}
@@ -322,11 +330,13 @@ const slotStyles = StyleSheet.create({
   },
   takenBadgeText: { fontSize: 10, color: '#fff', lineHeight: 12 },
   dealerBadge: {
-    position: 'absolute', top: -4, right: -4,
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: gold, alignItems: 'center', justifyContent: 'center', zIndex: 2,
+    position: 'absolute', top: -5, right: -5,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#1a0a2e', borderWidth: 2, borderColor: '#FFD700',
+    alignItems: 'center', justifyContent: 'center', zIndex: 2,
+    shadowColor: '#FFD700', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 4, elevation: 6,
   },
-  dealerText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#1a0a2e' },
+  dealerText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#FFD700' },
   joinBadge: {
     position: 'absolute', bottom: 0, right: 0,
     width: 22, height: 22, borderRadius: 11,
@@ -348,10 +358,10 @@ const slotStyles = StyleSheet.create({
     alignItems: 'center', gap: 1,
   },
   infoLeft: {
-    left: -10, right: -50, alignItems: 'center',
+    left: -30, right: -30, alignItems: 'center',
   },
   infoRight: {
-    right: -10, left: -50, alignItems: 'center',
+    left: -30, right: -30, alignItems: 'center',
   },
   name: {
     fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#FFF8E8',
@@ -359,7 +369,7 @@ const slotStyles = StyleSheet.create({
     textAlign: 'center',
   },
   chips: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#00FF88',
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#00FF88',
     textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
     textAlign: 'center',
   },
@@ -747,9 +757,9 @@ const cdStyles = StyleSheet.create({
 // Waiting overlay (< 2 players, no countdown)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface WaitingOverlayProps { seatedCount: number; }
+interface WaitingOverlayProps { seatedCount: number; isSeated: boolean; }
 
-const WaitingOverlay = memo(function WaitingOverlay({ seatedCount }: WaitingOverlayProps) {
+const WaitingOverlay = memo(function WaitingOverlay({ seatedCount, isSeated }: WaitingOverlayProps) {
   return (
     <View style={woStyles.overlay} pointerEvents="none">
       <View style={woStyles.box}>
@@ -760,6 +770,9 @@ const WaitingOverlay = memo(function WaitingOverlay({ seatedCount }: WaitingOver
         {seatedCount > 0 && (
           <Text style={woStyles.count}>{seatedCount} / 6 seated</Text>
         )}
+        {!isSeated && seatedCount > 0 && (
+          <Text style={woStyles.hint}>Tap on a seat to join</Text>
+        )}
       </View>
     </View>
   );
@@ -769,7 +782,7 @@ const woStyles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject, zIndex: 20,
     justifyContent: 'center', alignItems: 'center',
-    top: '35%', bottom: '35%',
+    top: '25%', bottom: '35%',
   },
   box: {
     backgroundColor: 'rgba(26,10,46,0.88)',
@@ -780,6 +793,7 @@ const woStyles = StyleSheet.create({
   title: { fontFamily: 'PressStart2P_400Regular', fontSize: 13, color: gold, letterSpacing: 2 },
   sub: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.8)', textAlign: 'center' },
   count: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.4)' },
+  hint: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: '#00FFFF', marginTop: 4 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -884,6 +898,7 @@ function SweepLabel({ x, y, text, color, fontSize, delay, holdMs, onDone }: {
       textAlign: 'center',
       fontFamily: 'PressStart2P_400Regular',
       fontSize,
+      lineHeight: fontSize * 2,
       color,
       textShadowColor: 'rgba(0,0,0,0.9)',
       textShadowOffset: { width: 0, height: 2 },
@@ -1005,7 +1020,7 @@ const WinPopup = memo(function WinPopup({ winnerName, handName, bestHandCards, w
       <Text style={{
         fontFamily: 'PressStart2P_400Regular',
         fontSize: 8,
-        lineHeight: 16,
+        lineHeight: 20,
         color: gold,
         marginBottom: 6,
       }}>
@@ -1055,9 +1070,9 @@ const pbStyles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: 'rgba(81,46,123,0.92)',
     borderWidth: 1, borderColor: gold, borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 3, marginBottom: 6,
+    paddingHorizontal: 14, paddingVertical: 5, marginBottom: 6,
   },
-  text: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 1 },
+  text: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold, letterSpacing: 1, textAlign: 'center' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1110,7 +1125,7 @@ const PotDisplay = memo(function PotDisplay({
 
 const potStyles = StyleSheet.create({
   wrap: {
-    alignItems: 'center', gap: 3, marginBottom: 8,
+    alignItems: 'center', gap: 3, marginBottom: 14,
   },
   coinRow: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
@@ -1120,7 +1135,7 @@ const potStyles = StyleSheet.create({
     width: COIN_SIZE, height: COIN_SIZE,
   },
   label: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold,
+    fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: gold,
     textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
 });
@@ -1291,8 +1306,9 @@ export default function TableScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const tokenType = useGameStore((s) => s.tokenType);
   const isPractice = id.startsWith('practice-');
-  const isSeeker = id.startsWith('seeker-');
+  const isSeeker = tokenType === 'SEEKER' || (!tokenType && id.startsWith('seeker-'));
   const fmtValue = useMemo(() => getFormatter(isPractice, isSeeker), [isPractice, isSeeker]);
 
   // Layout geometry — computed from actual screen size so nothing clips the top bar
@@ -1343,6 +1359,7 @@ export default function TableScreen() {
   // Check if the local player is sitting out
   const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
   const iAmSittingOut = mySeat?.isSittingOut ?? false;
+  const iAmAllIn = mySeat?.isAllIn ?? false;
 
   const { fold, call, raise, allIn, minRaise, maxRaise } = usePokerActions();
   const turnTimeoutMs = useGameStore((s) => s.turnTimeoutMs);
@@ -1415,7 +1432,12 @@ export default function TableScreen() {
         const amtStr = isSeeker
           ? result.amount.toLocaleString()
           : (() => { const sol = result.amount / 1_000_000_000; return sol >= 0.01 ? sol.toFixed(2) : sol.toFixed(4); })();
-        if (result.txSignature) {
+        if (result.txSignature === 'internal') {
+          setCashOutAlert({
+            title: 'CASH OUT COMPLETE',
+            message: `${amtStr} ${tokenLabel} has been credited to your internal balance.`,
+          });
+        } else if (result.txSignature) {
           setCashOutAlert({
             title: 'CASH OUT COMPLETE',
             message: `${amtStr} ${tokenLabel} has been transferred to your wallet.`,
@@ -1541,8 +1563,8 @@ export default function TableScreen() {
           minBuyIn={tablMinBuyIn || 10_000_000}
           maxBuyIn={tablMaxBuyIn || 100_000_000}
           onClose={closeBuyIn}
-          isPractice={id.startsWith('practice-')}
-          tokenType={id.startsWith('seeker-') ? 'SEEKER' : 'SOL'}
+          isPractice={isPractice}
+          tokenType={isSeeker ? 'SEEKER' : 'SOL'}
         />
       )}
 
@@ -1576,7 +1598,7 @@ export default function TableScreen() {
       {phase === 'countdown' && <CountdownOverlay seconds={countdownSeconds} />}
 
       {/* Waiting overlay */}
-      {phase === 'waiting' && seatedCount < 2 && <WaitingOverlay seatedCount={seatedCount} />}
+      {phase === 'waiting' && seatedCount < 2 && <WaitingOverlay seatedCount={seatedCount} isSeated={mySeatIndex !== null} />}
 
       {/* Table image — positioned between top bar and bottom controls */}
       <View style={[styles.tableArea, { marginTop:-90,top: TABLE_TOP, height: TABLE_H }]}>
@@ -1597,7 +1619,7 @@ export default function TableScreen() {
                       ? <PokerCard card={card} style={styles.cardSize} onMagnifyStart={setMagnifyInfo} onMagnifyEnd={() => setMagnifyInfo(null)} />
                       : showBack
                         ? <PokerCard card={null} faceDown style={styles.cardSize} />
-                        : <View style={styles.emptyCard} />}
+                        : null}
                   </View>
                 );
               })}
@@ -1648,7 +1670,7 @@ export default function TableScreen() {
 
       {/* Top bar */}
       <View style={[styles.topBarWrap, { top: insets.top + 6 }]}>
-        {secondsLeft > 0 && (
+        {secondsLeft > 0 && activePlayerSeatIndex !== null && (
           <View style={[styles.turnTimerWrap, secondsLeft <= 5 && styles.turnTimerWrapUrgent]}>
             <Text style={[styles.turnTimerText, secondsLeft <= 5 && styles.turnTimerUrgent]}>
               {secondsLeft}s
@@ -1657,7 +1679,7 @@ export default function TableScreen() {
         )}
         <View style={{ flex: 1 }} />
         <Pressable style={({ pressed }) => [styles.infoBtn, pressed && { opacity: 0.7 }]} onPress={() => setRoomInfoVisible(true)}>
-          <MaterialCommunityIcons name="information-outline" size={20} color={gold} />
+          <MaterialCommunityIcons name="information-outline" size={20} color="#00FFFF" />
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.leaveBtn, pressed && styles.leaveBtnP]}
@@ -1698,7 +1720,14 @@ export default function TableScreen() {
         onRequestClose={() => setRoomInfoVisible(false)}>
         <Pressable style={rmStyles.overlay} onPress={() => setRoomInfoVisible(false)}>
           <Pressable style={rmStyles.panel} onPress={(e) => e.stopPropagation?.()}>
-            <Text style={rmStyles.title}>ROOM INFO</Text>
+            {/* Header */}
+            <View style={rmStyles.header}>
+              <View style={rmStyles.headerLine} />
+              <Text style={rmStyles.title}>ROOM INFO</Text>
+              <View style={rmStyles.headerLine} />
+            </View>
+
+            {/* Room ID card */}
             <Pressable
               onPress={async () => {
                 if (id) {
@@ -1706,45 +1735,52 @@ export default function TableScreen() {
                 }
               }}
               style={rmStyles.idRow}>
-              <Text style={rmStyles.label}>ROOM ID</Text>
+              <Text style={rmStyles.idLabel}>ROOM ID</Text>
               <Text style={rmStyles.idValue}>{id ?? '—'}</Text>
               <Text style={rmStyles.copyHint}>TAP TO COPY</Text>
             </Pressable>
-            <View style={rmStyles.divider} />
-            <View style={rmStyles.row}>
-              <Text style={rmStyles.label}>BLINDS</Text>
-              <Text style={rmStyles.value}>
-                {isPractice
-                  ? `${tablSmallBlind}/${tablBigBlind} chips`
-                  : isSeeker
-                  ? `${formatSeekerValue(tablSmallBlind)} / ${formatSeekerValue(tablBigBlind)}`
-                  : `${formatSol(tablSmallBlind)} / ${formatSol(tablBigBlind)}`}
-              </Text>
+
+            {/* Stats grid */}
+            <View style={rmStyles.statsGrid}>
+              <View style={rmStyles.statCard}>
+                <Text style={rmStyles.statLabel}>BLINDS</Text>
+                <Text style={rmStyles.statValue}>
+                  {isPractice
+                    ? `${tablSmallBlind}/${tablBigBlind}`
+                    : isSeeker
+                    ? `${formatSeekerValue(tablSmallBlind)}/${formatSeekerValue(tablBigBlind)}`
+                    : `${formatSol(tablSmallBlind)}/${formatSol(tablBigBlind)}`}
+                </Text>
+              </View>
+              <View style={rmStyles.statCard}>
+                <Text style={rmStyles.statLabel}>BUY-IN</Text>
+                <Text style={rmStyles.statValue}>
+                  {isPractice
+                    ? `${(tablMinBuyIn || 0).toLocaleString()}–${(tablMaxBuyIn || 0).toLocaleString()}`
+                    : isSeeker
+                    ? `${formatSeekerValue(tablMinBuyIn || 0)}–${formatSeekerValue(tablMaxBuyIn || 0)}`
+                    : `${formatSol(tablMinBuyIn || 0)}–${formatSol(tablMaxBuyIn || 0)}`}
+                </Text>
+              </View>
+              <View style={rmStyles.statCard}>
+                <Text style={rmStyles.statLabel}>PLAYERS</Text>
+                <Text style={rmStyles.statValueCyan}>{seatedCount}<Text style={rmStyles.statDim}> / 6</Text></Text>
+              </View>
+              <View style={rmStyles.statCard}>
+                <Text style={rmStyles.statLabel}>TIMER</Text>
+                <Text style={rmStyles.statValueCyan}>{turnTimeoutMs ? `${turnTimeoutMs / 1000}s` : '—'}</Text>
+              </View>
             </View>
-            <View style={rmStyles.row}>
-              <Text style={rmStyles.label}>BUY-IN</Text>
-              <Text style={rmStyles.value}>
-                {isPractice
-                  ? `${(tablMinBuyIn || 0).toLocaleString()} – ${(tablMaxBuyIn || 0).toLocaleString()} chips`
-                  : isSeeker
-                  ? `${formatSeekerValue(tablMinBuyIn || 0)} – ${formatSeekerValue(tablMaxBuyIn || 0)}`
-                  : `${formatSol(tablMinBuyIn || 0)} – ${formatSol(tablMaxBuyIn || 0)}`}
-              </Text>
+
+            {/* Type badge */}
+            <View style={rmStyles.typeBadgeRow}>
+              <View style={[rmStyles.typeBadge, isPractice ? rmStyles.typePractice : isSeeker ? rmStyles.typeSeeker : rmStyles.typeSol]}>
+                <Text style={rmStyles.typeBadgeText}>{isPractice ? 'PRACTICE' : isSeeker ? 'SEEKER' : 'SOL'}</Text>
+              </View>
             </View>
-            <View style={rmStyles.row}>
-              <Text style={rmStyles.label}>PLAYERS</Text>
-              <Text style={rmStyles.value}>{seatedCount} / 6</Text>
-            </View>
-            <View style={rmStyles.row}>
-              <Text style={rmStyles.label}>TURN TIMER</Text>
-              <Text style={rmStyles.value}>{turnTimeoutMs ? `${turnTimeoutMs / 1000}s` : '—'}</Text>
-            </View>
-            <View style={rmStyles.row}>
-              <Text style={rmStyles.label}>TYPE</Text>
-              <Text style={rmStyles.value}>{isPractice ? 'PRACTICE' : isSeeker ? 'SEEKER' : 'SOL'}</Text>
-            </View>
-            <View style={rmStyles.divider} />
-            <Pressable style={rmStyles.closeBtn} onPress={() => setRoomInfoVisible(false)}>
+
+            {/* Close */}
+            <Pressable style={({ pressed }) => [rmStyles.closeBtn, pressed && { opacity: 0.7 }]} onPress={() => setRoomInfoVisible(false)}>
               <Text style={rmStyles.closeBtnText}>CLOSE</Text>
             </Pressable>
           </Pressable>
@@ -1800,8 +1836,14 @@ export default function TableScreen() {
       {kickedReason && (
         <View style={[styles.bottomControls, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.bustedBanner}>
-            <Text style={styles.bustedText}>INSUFFICIENT BALANCE</Text>
-            <Text style={styles.bustedSub}>You are now spectating this table.</Text>
+            <Text style={styles.bustedText}>
+              {kickedReason.includes('inactivity') ? 'KICKED FOR INACTIVITY' : 'BUSTED OUT'}
+            </Text>
+            <Text style={styles.bustedSub}>
+              {kickedReason.includes('inactivity')
+                ? 'Your balance has been transferred back to your account.'
+                : 'You are now spectating this table.'}
+            </Text>
           </View>
         </View>
       )}
@@ -1815,7 +1857,7 @@ export default function TableScreen() {
               onPress={() => SocketService.returnToTable(id)}>
               <Text style={styles.imBackText}>I'M BACK</Text>
             </Pressable>
-          ) : isMyTurn ? (
+          ) : isMyTurn && !iAmAllIn ? (
             <>
               <View style={styles.raiseRow}>
                 <RaiseAmountInput
@@ -1827,12 +1869,21 @@ export default function TableScreen() {
                 />
               </View>
 
-              <GameActionButtons
-                currentBet={currentBet}
-                myChips={myChips}
-                onAction={handleAction}
-              />
+              <View style={styles.actionRow}>
+                <View style={styles.actionRowButtons}>
+                  <GameActionButtons
+                    currentBet={currentBet}
+                    myChips={myChips}
+                    onAction={handleAction}
+                  />
+                </View>
+                {isSeeker && <EmojiPanel onSend={(emoji) => SocketService.sendEmojiReaction(id, emoji)} />}
+              </View>
             </>
+          ) : isSeeker ? (
+            <View style={styles.emojiOnly}>
+              <EmojiPanel onSend={(emoji) => SocketService.sendEmojiReaction(id, emoji)} />
+            </View>
           ) : null}
         </View>
       )}
@@ -1857,11 +1908,11 @@ const styles = StyleSheet.create({
     left: 0, right: 0,
     alignItems: 'center', justifyContent: 'center',
   },
-  communityRow: { flexDirection: 'row', justifyContent: 'center', gap: 4 },
-  communitySlot: { width: 46, alignItems: 'center', justifyContent: 'center' },
-  cardSize: { width: 44, height: 62 },
+  communityRow: { flexDirection: 'row', justifyContent: 'center', gap: 2 },
+  communitySlot: { width: 56, alignItems: 'center', justifyContent: 'center' },
+  cardSize: { width: 54, height: 76 },
   emptyCard: {
-    width: 44, height: 62, borderRadius: 6,
+    width: 54, height: 76, borderRadius: 6,
     backgroundColor: 'rgba(0,0,0,0.28)',
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.55)',
     ...Platform.select({
@@ -1914,9 +1965,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   infoBtn: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 36, height: 36, borderRadius: 6,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1.5, borderColor: 'rgba(255,215,0,0.4)',
+    borderWidth: 1.5, borderColor: 'rgba(0,255,255,0.4)',
     alignItems: 'center', justifyContent: 'center',
   },
 
@@ -1940,8 +1991,8 @@ const styles = StyleSheet.create({
     color: '#FF4444',
     textShadowColor: '#FF4444',
   },
-  holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
-  holeCard: { width: 52, height: 74 },
+  holeCardsRow: { flexDirection: 'row', justifyContent: 'center', gap: 4, marginTop: 24 },
+  holeCard: { width: 64, height: 90 },
   bustedBanner: {
     backgroundColor: 'rgba(26,10,46,0.92)',
     borderWidth: 2, borderColor: '#FF4444', borderRadius: 14,
@@ -1956,6 +2007,9 @@ const styles = StyleSheet.create({
     fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.7)',
     letterSpacing: 1,
   },
+  actionRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  actionRowButtons: { flex: 1 },
+  emojiOnly: { alignItems: 'flex-end', paddingHorizontal: 8 },
   raiseRow: { flexDirection: 'row', marginBottom: 12, paddingHorizontal: 4 },
   imBackBtn: {
     backgroundColor: '#00AA66',
@@ -1975,25 +2029,46 @@ const styles = StyleSheet.create({
 
 // Room info modal styles
 const rmStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   panel: {
     width: '100%', maxWidth: 340,
-    backgroundColor: 'rgba(26,10,46,0.98)', borderRadius: 20, borderWidth: 2, borderColor: gold, padding: 22, gap: 10,
+    backgroundColor: '#0d0820', borderRadius: 16, borderWidth: 2, borderColor: '#00FFFF',
+    padding: 20, gap: 14,
     ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.7, shadowRadius: 24 },
+      ios: { shadowColor: '#00FFFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 20 },
       android: { elevation: 24 }, default: {},
     }),
   },
-  title: { fontFamily: 'PressStart2P_400Regular', fontSize: 12, color: gold, textAlign: 'center', letterSpacing: 1, marginBottom: 4 },
-  idRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', gap: 4 },
-  idValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: gold, letterSpacing: 0.5 },
-  copyHint: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.35)' },
-  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 },
-  label: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.45)', letterSpacing: 1 },
-  value: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.9)' },
-  closeBtn: { alignItems: 'center', paddingVertical: 8 },
-  closeBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: 'rgba(255,255,255,0.4)' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 },
+  headerLine: { flex: 1, height: 1, backgroundColor: 'rgba(0,255,255,0.2)' },
+  title: { fontFamily: 'PressStart2P_400Regular', fontSize: 11, color: '#00FFFF', textAlign: 'center', letterSpacing: 2 },
+  idRow: {
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,
+    backgroundColor: 'rgba(0,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(0,255,255,0.15)', gap: 5,
+  },
+  idLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.4)', letterSpacing: 1 },
+  idValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#00FFFF', letterSpacing: 0.5 },
+  copyHint: { fontFamily: 'PressStart2P_400Regular', fontSize: 5, color: 'rgba(255,255,255,0.25)', letterSpacing: 0.5 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  statCard: {
+    width: '47%', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', paddingVertical: 10, paddingHorizontal: 10, gap: 6,
+  },
+  statLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.35)', letterSpacing: 1 },
+  statValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FFFFFF', letterSpacing: 0.5 },
+  statValueCyan: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: '#00FFFF', letterSpacing: 0.5 },
+  statDim: { color: 'rgba(255,255,255,0.35)' },
+  typeBadgeRow: { alignItems: 'center' },
+  typeBadge: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1 },
+  typeSol: { backgroundColor: 'rgba(0,255,136,0.1)', borderColor: 'rgba(0,255,136,0.3)' },
+  typeSeeker: { backgroundColor: 'rgba(191,95,255,0.1)', borderColor: 'rgba(191,95,255,0.3)' },
+  typePractice: { backgroundColor: 'rgba(255,215,0,0.1)', borderColor: 'rgba(255,215,0,0.3)' },
+  typeBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#FFFFFF', letterSpacing: 2 },
+  closeBtn: {
+    alignItems: 'center', paddingVertical: 10, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  closeBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.5)', letterSpacing: 2 },
 });
 
 // Leave-confirmation modal styles

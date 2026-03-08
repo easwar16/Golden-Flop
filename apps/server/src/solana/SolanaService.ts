@@ -31,6 +31,29 @@ function getConnection(): Connection {
   return new Connection(clusterApiUrl(network), 'confirmed');
 }
 
+/**
+ * Poll for a confirmed transaction with retries.
+ * The wallet has already signed + sent — we just need to wait for the RPC
+ * to index it. Polls every 2s for up to ~20s before giving up.
+ */
+async function fetchConfirmedTransaction(
+  connection: Connection,
+  txSignature: string,
+) {
+  const MAX_RETRIES = 10;
+  const DELAY_MS = 2_000;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const tx = await connection.getParsedTransaction(txSignature, {
+      maxSupportedTransactionVersion: 0,
+      commitment: 'confirmed',
+    });
+    if (tx) return tx;
+    await new Promise(r => setTimeout(r, DELAY_MS));
+  }
+  return null;
+}
+
 // ─── Treasury helpers ─────────────────────────────────────────────────────────
 
 function getTreasuryPublicKey(): PublicKey {
@@ -107,10 +130,7 @@ export async function verifySOLDeposit(
     const connection = getConnection();
     const treasury   = getTreasuryPublicKey();
 
-    const tx = await connection.getParsedTransaction(txSignature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    });
+    const tx = await fetchConfirmedTransaction(connection, txSignature);
 
     if (!tx) {
       return { success: false, error: 'Transaction not found or not confirmed' };
@@ -173,10 +193,7 @@ export async function verifySOLDepositToVault(
   try {
     const connection = getConnection();
 
-    const tx = await connection.getParsedTransaction(txSignature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    });
+    const tx = await fetchConfirmedTransaction(connection, txSignature);
 
     if (!tx) {
       return { success: false, error: 'Transaction not found or not confirmed' };
@@ -241,10 +258,7 @@ export async function verifySPLDeposit(
     const treasury   = getTreasuryPublicKey();
     const mint       = getSeekerMint();
 
-    const tx = await connection.getParsedTransaction(txSignature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    });
+    const tx = await fetchConfirmedTransaction(connection, txSignature);
 
     if (!tx) {
       return { success: false, error: 'Transaction not found or not confirmed' };
@@ -325,10 +339,7 @@ export async function verifySPLDepositToVault(
     const connection = getConnection();
     const mint = getSeekerMint();
 
-    const tx = await connection.getParsedTransaction(txSignature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    });
+    const tx = await fetchConfirmedTransaction(connection, txSignature);
 
     if (!tx) {
       return { success: false, error: 'Transaction not found or not confirmed' };

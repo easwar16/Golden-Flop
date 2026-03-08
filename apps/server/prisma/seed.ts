@@ -1,9 +1,12 @@
 /**
  * Prisma seed script – run with: npx prisma db seed
  *
- * Seeds all 16 predefined rooms (12 SOL tables + 4 practice tables)
- * and a test user (development only).
+ * Seeds 115 predefined rooms:
+ *   - 50 SOL tables (micro/low/mid/high/VIP + turbo)
+ *   - 50 SEEKER tables (micro/low/mid/high/VIP + turbo)
+ *   - 15 Practice tables (beginner/casual/advanced/highroller/turbo/headsup)
  *
+ * Also seeds a test user (development only).
  * Uses upsert so it's idempotent — safe to run multiple times.
  */
 
@@ -37,35 +40,216 @@ interface RoomDef {
   rakeCap: bigint;
 }
 
+// ── SOL table tier definitions ────────────────────────────────────────────────
+
+interface SolTier {
+  prefix: string;
+  smallBlind: number;  // in SOL
+  bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
+  turnTimeoutMs: number;
+  isPremium: boolean;
+}
+
+const SOL_TIERS: SolTier[] = [
+  // Micro — min buy-in 0.01 SOL
+  { prefix: 'micro-a', smallBlind: 0.001,   bigBlind: 0.002,   minBuyIn: 0.01,  maxBuyIn: 0.05,   turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'micro-b', smallBlind: 0.001,   bigBlind: 0.002,   minBuyIn: 0.01,  maxBuyIn: 0.08,   turnTimeoutMs: 45_000, isPremium: false },
+  // Low — min buy-in 0.05 SOL
+  { prefix: 'low-a',   smallBlind: 0.002,   bigBlind: 0.005,   minBuyIn: 0.05,  maxBuyIn: 0.25,   turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'low-b',   smallBlind: 0.002,   bigBlind: 0.005,   minBuyIn: 0.05,  maxBuyIn: 0.30,   turnTimeoutMs: 45_000, isPremium: false },
+  // Mid — min buy-in 0.8 SOL
+  { prefix: 'mid-a',   smallBlind: 0.008,   bigBlind: 0.016,   minBuyIn: 0.80,  maxBuyIn: 4.00,   turnTimeoutMs: 30_000, isPremium: false },
+  { prefix: 'mid-b',   smallBlind: 0.008,   bigBlind: 0.016,   minBuyIn: 0.80,  maxBuyIn: 5.00,   turnTimeoutMs: 30_000, isPremium: false },
+  // High — min buy-in 1.0 SOL
+  { prefix: 'high-a',  smallBlind: 0.01,    bigBlind: 0.02,    minBuyIn: 1.00,  maxBuyIn: 5.00,   turnTimeoutMs: 15_000, isPremium: false },
+  { prefix: 'high-b',  smallBlind: 0.01,    bigBlind: 0.02,    minBuyIn: 1.00,  maxBuyIn: 10.00,  turnTimeoutMs: 15_000, isPremium: true  },
+  // VIP — unchanged
+  { prefix: 'vip-a',   smallBlind: 0.025,   bigBlind: 0.05,    minBuyIn: 2.50,  maxBuyIn: 25.00,  turnTimeoutMs: 15_000, isPremium: true  },
+  { prefix: 'vip-b',   smallBlind: 0.05,    bigBlind: 0.1,     minBuyIn: 5.00,  maxBuyIn: 50.00,  turnTimeoutMs: 15_000, isPremium: true  },
+];
+
+// Distribution: 50 SOL tables across tiers
+// Micro: 8, Low: 10, Mid: 12, High: 10, VIP: 4, Turbo: 6
+const SOL_DISTRIBUTION: Record<string, number> = {
+  'micro-a': 4, 'micro-b': 4,
+  'low-a': 5,   'low-b': 5,
+  'mid-a': 6,   'mid-b': 6,
+  'high-a': 5,  'high-b': 5,
+  'vip-a': 2,   'vip-b': 2,
+};
+
+function generateSolRooms(): RoomDef[] {
+  const rooms: RoomDef[] = [];
+  for (const tier of SOL_TIERS) {
+    const count = SOL_DISTRIBUTION[tier.prefix] ?? 2;
+    for (let i = 1; i <= count; i++) {
+      rooms.push({
+        id: `table-${tier.prefix}-${i}`,
+        name: `SOL ${tier.prefix} #${i}`,
+        smallBlind: sol(tier.smallBlind),
+        bigBlind: sol(tier.bigBlind),
+        minBuyIn: sol(tier.minBuyIn),
+        maxBuyIn: sol(tier.maxBuyIn),
+        maxPlayers: 6,
+        turnTimeoutMs: tier.turnTimeoutMs,
+        tokenMint: NATIVE_SOL_MINT,
+        isPremium: tier.isPremium,
+        isPractice: false,
+        rakePercentage: 2.5,
+        rakeCap: sol(tier.bigBlind * 3),
+      });
+    }
+  }
+  // Turbo tables (10s timer) — 6 tables across low/mid/high
+  const turboTiers = [
+    { prefix: 'turbo-low',  sb: 0.002,  bb: 0.005,  min: 0.05,  max: 0.25,  count: 2 },
+    { prefix: 'turbo-mid',  sb: 0.008,  bb: 0.016,  min: 0.80,  max: 4.00,  count: 2 },
+    { prefix: 'turbo-high', sb: 0.01,   bb: 0.02,   min: 1.00,  max: 5.00,  count: 2 },
+  ];
+  for (const t of turboTiers) {
+    for (let i = 1; i <= t.count; i++) {
+      rooms.push({
+        id: `table-${t.prefix}-${i}`,
+        name: `Turbo ${t.prefix.replace('turbo-', '')} #${i}`,
+        smallBlind: sol(t.sb),
+        bigBlind: sol(t.bb),
+        minBuyIn: sol(t.min),
+        maxBuyIn: sol(t.max),
+        maxPlayers: 6,
+        turnTimeoutMs: 10_000,
+        tokenMint: NATIVE_SOL_MINT,
+        isPremium: false,
+        isPractice: false,
+        rakePercentage: 2.5,
+        rakeCap: sol(t.bb * 3),
+      });
+    }
+  }
+  return rooms;
+}
+
+// ── SEEKER table tier definitions ────────────────────────────────────────────
+
+interface SeekerTier {
+  prefix: string;
+  smallBlind: bigint;
+  bigBlind: bigint;
+  minBuyIn: bigint;
+  maxBuyIn: bigint;
+  turnTimeoutMs: number;
+  isPremium: boolean;
+}
+
+const SEEKER_TIERS: SeekerTier[] = [
+  // Micro — min 200 SEEKER
+  { prefix: 'seeker-micro-a', smallBlind: 4n,      bigBlind: 8n,        minBuyIn: 200n,        maxBuyIn: 2_000n,       turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-micro-b', smallBlind: 4n,      bigBlind: 8n,        minBuyIn: 200n,        maxBuyIn: 3_200n,       turnTimeoutMs: 45_000, isPremium: false },
+  // Low — min 800 SEEKER
+  { prefix: 'seeker-low-a',   smallBlind: 8n,      bigBlind: 20n,       minBuyIn: 800n,        maxBuyIn: 8_000n,       turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-low-b',   smallBlind: 8n,      bigBlind: 20n,       minBuyIn: 800n,        maxBuyIn: 10_000n,      turnTimeoutMs: 45_000, isPremium: false },
+  // Mid — min 4,000 SEEKER
+  { prefix: 'seeker-mid-a',   smallBlind: 40n,     bigBlind: 80n,       minBuyIn: 4_000n,      maxBuyIn: 40_000n,      turnTimeoutMs: 30_000, isPremium: false },
+  { prefix: 'seeker-mid-b',   smallBlind: 40n,     bigBlind: 80n,       minBuyIn: 4_000n,      maxBuyIn: 60_000n,      turnTimeoutMs: 30_000, isPremium: false },
+  // High — min 20,000 SEEKER
+  { prefix: 'seeker-high-a',  smallBlind: 200n,    bigBlind: 400n,      minBuyIn: 20_000n,     maxBuyIn: 200_000n,     turnTimeoutMs: 15_000, isPremium: false },
+  { prefix: 'seeker-high-b',  smallBlind: 200n,    bigBlind: 400n,      minBuyIn: 20_000n,     maxBuyIn: 300_000n,     turnTimeoutMs: 15_000, isPremium: false },
+  // VIP — min 100K SEEKER
+  { prefix: 'seeker-vip-a',   smallBlind: 1_000n,  bigBlind: 2_000n,    minBuyIn: 100_000n,    maxBuyIn: 1_000_000n,   turnTimeoutMs: 15_000, isPremium: true  },
+  { prefix: 'seeker-vip-b',   smallBlind: 2_000n,  bigBlind: 4_000n,    minBuyIn: 200_000n,    maxBuyIn: 2_000_000n,   turnTimeoutMs: 15_000, isPremium: true  },
+];
+
+// Distribution: 50 SEEKER tables
+const SEEKER_DISTRIBUTION: Record<string, number> = {
+  'seeker-micro-a': 4, 'seeker-micro-b': 4,
+  'seeker-low-a': 5,   'seeker-low-b': 5,
+  'seeker-mid-a': 6,   'seeker-mid-b': 6,
+  'seeker-high-a': 5,  'seeker-high-b': 5,
+  'seeker-vip-a': 3,   'seeker-vip-b': 2,
+};
+
+// Turbo SEEKER tables: 5 tables
+const SEEKER_TURBO = [
+  { prefix: 'seeker-turbo-low',  sb: 8n,    bb: 20n,    min: 800n,     max: 8_000n,    count: 2 },
+  { prefix: 'seeker-turbo-mid',  sb: 40n,   bb: 80n,    min: 4_000n,   max: 40_000n,   count: 2 },
+  { prefix: 'seeker-turbo-high', sb: 200n,  bb: 400n,   min: 20_000n,  max: 200_000n,  count: 1 },
+];
+
+function generateSeekerRooms(): RoomDef[] {
+  const rooms: RoomDef[] = [];
+  for (const tier of SEEKER_TIERS) {
+    const count = SEEKER_DISTRIBUTION[tier.prefix] ?? 2;
+    for (let i = 1; i <= count; i++) {
+      rooms.push({
+        id: `${tier.prefix}-${i}`,
+        name: `SEEKER ${tier.prefix} #${i}`,
+        smallBlind: tier.smallBlind,
+        bigBlind: tier.bigBlind,
+        minBuyIn: tier.minBuyIn,
+        maxBuyIn: tier.maxBuyIn,
+        maxPlayers: 6,
+        turnTimeoutMs: tier.turnTimeoutMs,
+        tokenMint: SEEKER_MINT,
+        isPremium: tier.isPremium,
+        isPractice: false,
+        rakePercentage: 2.5,
+        rakeCap: tier.bigBlind * 3n,
+      });
+    }
+  }
+  for (const t of SEEKER_TURBO) {
+    for (let i = 1; i <= t.count; i++) {
+      rooms.push({
+        id: `${t.prefix}-${i}`,
+        name: `SEEKER Turbo ${t.prefix.replace('seeker-turbo-', '')} #${i}`,
+        smallBlind: t.sb,
+        bigBlind: t.bb,
+        minBuyIn: t.min,
+        maxBuyIn: t.max,
+        maxPlayers: 6,
+        turnTimeoutMs: 10_000,
+        tokenMint: SEEKER_MINT,
+        isPremium: false,
+        isPractice: false,
+        rakePercentage: 2.5,
+        rakeCap: t.bb * 3n,
+      });
+    }
+  }
+  return rooms;
+}
+
+// ── Practice rooms (15) ──────────────────────────────────────────────────────
+
+const PRACTICE_ROOMS: RoomDef[] = [
+  // Beginner (3)
+  { id: 'practice-beginner-1', name: 'Beginner #1',   smallBlind: 5n,     bigBlind: 10n,      minBuyIn: 1_000n,   maxBuyIn: 2_000n,   maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-beginner-2', name: 'Beginner #2',   smallBlind: 5n,     bigBlind: 10n,      minBuyIn: 1_000n,   maxBuyIn: 2_000n,   maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-beginner-3', name: 'Beginner #3',   smallBlind: 10n,    bigBlind: 20n,      minBuyIn: 2_000n,   maxBuyIn: 4_000n,   maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  // Casual (3)
+  { id: 'practice-casual-1',   name: 'Casual #1',     smallBlind: 25n,    bigBlind: 50n,      minBuyIn: 5_000n,   maxBuyIn: 10_000n,  maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-casual-2',   name: 'Casual #2',     smallBlind: 25n,    bigBlind: 50n,      minBuyIn: 5_000n,   maxBuyIn: 10_000n,  maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-casual-3',   name: 'Casual #3',     smallBlind: 50n,    bigBlind: 100n,     minBuyIn: 10_000n,  maxBuyIn: 20_000n,  maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  // Advanced (3)
+  { id: 'practice-advanced-1', name: 'Advanced #1',   smallBlind: 100n,   bigBlind: 200n,     minBuyIn: 20_000n,  maxBuyIn: 40_000n,  maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-advanced-2', name: 'Advanced #2',   smallBlind: 100n,   bigBlind: 200n,     minBuyIn: 20_000n,  maxBuyIn: 40_000n,  maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-advanced-3', name: 'Advanced #3',   smallBlind: 200n,   bigBlind: 400n,     minBuyIn: 40_000n,  maxBuyIn: 80_000n,  maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  // High Roller (2)
+  { id: 'practice-highroller-1', name: 'High Roller #1', smallBlind: 500n,  bigBlind: 1_000n,  minBuyIn: 100_000n, maxBuyIn: 200_000n, maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-highroller-2', name: 'High Roller #2', smallBlind: 1_000n,bigBlind: 2_000n,  minBuyIn: 200_000n, maxBuyIn: 400_000n, maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  // Turbo (2)
+  { id: 'practice-turbo-1',    name: 'Turbo #1',      smallBlind: 25n,    bigBlind: 50n,      minBuyIn: 5_000n,   maxBuyIn: 10_000n,  maxPlayers: 6, turnTimeoutMs: 10_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-turbo-2',    name: 'Turbo #2',      smallBlind: 100n,   bigBlind: 200n,     minBuyIn: 20_000n,  maxBuyIn: 40_000n,  maxPlayers: 6, turnTimeoutMs: 10_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  // Heads Up (2)
+  { id: 'practice-headsup-1',  name: 'Heads Up #1',   smallBlind: 25n,    bigBlind: 50n,      minBuyIn: 5_000n,   maxBuyIn: 10_000n,  maxPlayers: 2, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  { id: 'practice-headsup-2',  name: 'Heads Up #2',   smallBlind: 100n,   bigBlind: 200n,     minBuyIn: 20_000n,  maxBuyIn: 40_000n,  maxPlayers: 2, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+];
+
 const ROOMS: RoomDef[] = [
-  // ── 🟢 Low Stakes (SOL) ── rake cap = 3 BB ────────────────────────────────
-  { id: 'table-low-1', name: '🟢 Low Stakes #1', smallBlind: sol(0.0001), bigBlind: sol(0.0002), minBuyIn: sol(0.01), maxBuyIn: sol(0.10), maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.0006) },
-  { id: 'table-low-2', name: '🟢 Low Stakes #2', smallBlind: sol(0.0001), bigBlind: sol(0.0002), minBuyIn: sol(0.01), maxBuyIn: sol(0.10), maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.0006) },
-  { id: 'table-low-3', name: '🟢 Low Stakes #3', smallBlind: sol(0.0001), bigBlind: sol(0.0002), minBuyIn: sol(0.01), maxBuyIn: sol(0.10), maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.0006) },
-  { id: 'table-low-4', name: '🟢 Low Stakes #4', smallBlind: sol(0.0002), bigBlind: sol(0.0004), minBuyIn: sol(0.02), maxBuyIn: sol(0.20), maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.0012) },
-  { id: 'table-low-5', name: '🟢 Low Stakes #5', smallBlind: sol(0.0002), bigBlind: sol(0.0004), minBuyIn: sol(0.02), maxBuyIn: sol(0.20), maxPlayers: 9, turnTimeoutMs: 45_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.0012) },
-
-  // ── 🟡 Mid Stakes (SOL) ── rake cap = 3 BB ────────────────────────────────
-  { id: 'table-mid-1', name: '🟡 Mid Stakes #1', smallBlind: sol(0.001), bigBlind: sol(0.002), minBuyIn: sol(0.10), maxBuyIn: sol(1.00), maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.006) },
-  { id: 'table-mid-2', name: '🟡 Mid Stakes #2', smallBlind: sol(0.001), bigBlind: sol(0.002), minBuyIn: sol(0.10), maxBuyIn: sol(1.00), maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.006) },
-  { id: 'table-mid-3', name: '🟡 Mid Stakes #3', smallBlind: sol(0.001), bigBlind: sol(0.002), minBuyIn: sol(0.10), maxBuyIn: sol(1.00), maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.006) },
-  { id: 'table-mid-4', name: '🟡 Mid Stakes #4', smallBlind: sol(0.002), bigBlind: sol(0.004), minBuyIn: sol(0.20), maxBuyIn: sol(2.00), maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.012) },
-  { id: 'table-mid-5', name: '🟡 Mid Stakes #5', smallBlind: sol(0.002), bigBlind: sol(0.004), minBuyIn: sol(0.20), maxBuyIn: sol(2.00), maxPlayers: 9, turnTimeoutMs: 30_000, tokenMint: NATIVE_SOL_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.012) },
-
-  // ── 🔴 High Roller (SOL) ── rake cap = 3 BB ───────────────────────────────
-  { id: 'table-high-1', name: '🔴 High Roller #1', smallBlind: sol(0.01), bigBlind: sol(0.02), minBuyIn: sol(1.00), maxBuyIn: sol(10.00), maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: NATIVE_SOL_MINT, isPremium: true, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.06) },
-  { id: 'table-high-2', name: '🔴 High Roller #2', smallBlind: sol(0.01), bigBlind: sol(0.02), minBuyIn: sol(1.00), maxBuyIn: sol(10.00), maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: NATIVE_SOL_MINT, isPremium: true, isPractice: false, rakePercentage: 2.5, rakeCap: sol(0.06) },
-
-  // ── 🟣 SEEKER Token Tables ── rake cap = 3 BB ─────────────────────────────
-  { id: 'seeker-low-1',  name: '🟣 Seeker Low',  smallBlind: 5n,   bigBlind: 10n,   minBuyIn: 500n,    maxBuyIn: 5_000n,    maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: SEEKER_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: 30n },
-  { id: 'seeker-mid-1',  name: '🟣 Seeker Mid',  smallBlind: 25n,  bigBlind: 50n,   minBuyIn: 2_500n,  maxBuyIn: 25_000n,   maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: SEEKER_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: 150n },
-  { id: 'seeker-high-1', name: '🟣 Seeker High', smallBlind: 100n, bigBlind: 200n,  minBuyIn: 10_000n, maxBuyIn: 100_000n,  maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: SEEKER_MINT, isPremium: false, isPractice: false, rakePercentage: 2.5, rakeCap: 600n },
-
-  // ── 🎯 Practice (free chips, no rake) ─────────────────────────────────────
-  { id: 'practice-beginner',   name: 'Beginner Table', smallBlind: 5n,   bigBlind: 10n,    minBuyIn: 1_000n,   maxBuyIn: 2_000n,   maxPlayers: 6, turnTimeoutMs: 45_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
-  { id: 'practice-casual',     name: 'Casual Lounge',  smallBlind: 25n,  bigBlind: 50n,    minBuyIn: 5_000n,   maxBuyIn: 10_000n,  maxPlayers: 6, turnTimeoutMs: 30_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
-  { id: 'practice-advanced',   name: 'Advanced Room',  smallBlind: 100n, bigBlind: 200n,   minBuyIn: 20_000n,  maxBuyIn: 40_000n,  maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
-  { id: 'practice-highroller', name: 'High Roller',    smallBlind: 500n, bigBlind: 1_000n, minBuyIn: 100_000n, maxBuyIn: 200_000n, maxPlayers: 6, turnTimeoutMs: 15_000, tokenMint: 'SOL', isPremium: false, isPractice: true, rakePercentage: 0, rakeCap: 0n },
+  ...generateSolRooms(),
+  ...generateSeekerRooms(),
+  ...PRACTICE_ROOMS,
 ];
 
 // ── Main ────────────────────────────────────────────────────────────────────

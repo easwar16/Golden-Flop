@@ -106,11 +106,12 @@ const styles = StyleSheet.create({
   btnBg: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   btnText: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff' },
   raiseBtnText: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#fff',
-    textShadowColor: 'rgba(0,60,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+    fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 10 : 9, color: '#FFD700',
+    textShadowColor: '#000000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
   allInWrap: { flex: 1, minHeight: 48, overflow: 'hidden' },
   allInBtnText: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: '#fff',
+    fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 8 : 7, color: '#FFFFFF',
+    textShadowColor: '#2A004A', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4,
   },
 });

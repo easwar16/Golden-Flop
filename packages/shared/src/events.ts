@@ -57,6 +57,18 @@ export interface PlayerActionPayload {
   amount?: number;
 }
 
+export interface EmojiReactionPayload {
+  tableId: string;
+  emoji: string;
+}
+
+export interface EmojiReactionBroadcast {
+  tableId: string;
+  playerId: string;
+  seatIndex: number;
+  emoji: string;
+}
+
 export interface ClientToServerEvents {
   create_table: (payload: CreateTablePayload, ack: (tableId: string) => void) => void;
   join_table: (payload: JoinTablePayload, ack: (err: string | null) => void) => void;
@@ -71,11 +83,15 @@ export interface ClientToServerEvents {
   /** Release a previously reserved seat. */
   release_seat: (payload: ReleaseSeatPayload) => void;
   player_action: (payload: PlayerActionPayload) => void;
+  /** Send an emoji reaction to the table */
+  emoji_reaction: (payload: EmojiReactionPayload) => void;
   /** Player returns from sitting out */
   return_to_table: (payload: { tableId: string }) => void;
   request_tables: () => void;
   /** Preferred alias for request_tables — returns the same tables_list event */
   get_tables: () => void;
+  /** Stop receiving periodic lobby updates (when entering a table). */
+  leave_lobby: () => void;
   /** Spectate a table — server responds with table_state (no hole cards) */
   watch_table: (payload: { tableId: string }) => void;
 }
@@ -174,6 +190,8 @@ export interface ServerToClientEvents {
   player_sitting_out: (payload: PlayerSitOutPayload) => void;
   /** Broadcast when a sitting-out player returns */
   player_returned: (payload: PlayerReturnedPayload) => void;
+  /** Emoji reaction broadcast to all players at the table */
+  emoji_reaction: (payload: EmojiReactionBroadcast) => void;
   /** Error back to the requesting socket */
   error: (payload: ErrorPayload) => void;
   /** Sent on reconnect — same shape as table_state */

@@ -19,7 +19,7 @@ import type {
   InterServerEvents,
   SocketData,
 } from '@goldenflop/shared';
-import { RoomManager } from '../room/RoomManager';
+import { RoomManager, LOBBY_ROOM } from '../room/RoomManager';
 import { TableRegistry } from '../table/TableRegistry';
 import { extractSocketUser } from '../auth/jwtMiddleware';
 import { processBuyIn, processCashOut } from '../balance/BalanceService';
@@ -83,11 +83,18 @@ export function registerSocketHandlers(
     // per-table metadata enrichment, or seat-map queries.
 
     socket.on('request_tables', () => {
-      socket.emit('tables_list', roomManager.getLobby());
+      socket.join(LOBBY_ROOM);
+      roomManager.sendLobbyTo(socket.id);
     });
 
     socket.on('get_tables', () => {
-      socket.emit('tables_list', roomManager.getLobby());
+      socket.join(LOBBY_ROOM);
+      roomManager.sendLobbyTo(socket.id);
+    });
+
+    // Leave the lobby broadcast group when entering a table
+    socket.on('leave_lobby', () => {
+      socket.leave(LOBBY_ROOM);
     });
 
     // ── Create table ──────────────────────────────────────────────────────
@@ -378,6 +385,39 @@ export function registerSocketHandlers(
       // If this socket is a seated player, send personalized state (with mySeatIndex)
       const seatedPlayer = room.getPlayerBySocketId(socket.id);
       socket.emit('table_state', room.buildStateFor(seatedPlayer?.id ?? null));
+    });
+
+    // ── Emoji reactions ──────────────────────────────────────────────────
+
+    const EMOJI_COOLDOWN_MS = 3_000;
+    const ALLOWED_EMOJIS = new Set(['😂', '😡', '🔥', '👀', '😎', '💰', '🤯', '🙂']);
+    let lastEmojiAt = 0;
+
+    socket.on('emoji_reaction', (payload) => {
+      const now = Date.now();
+      if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return; // rate limit
+      if (!payload.tableId || !payload.emoji) return;
+      if (!ALLOWED_EMOJIS.has(payload.emoji)) return;
+
+      const room = roomManager.getRoom(payload.tableId);
+      if (!room) return;
+
+      // Emoji reactions are seeker-room only
+      if (room.tokenType !== 'SEEKER') return;
+
+      // Must be seated at the table
+      const seatIndex = room['socketToSeat'].get(socket.id);
+      if (seatIndex === undefined) return;
+
+      lastEmojiAt = now;
+
+      // Broadcast to all players in the room
+      io.to(payload.tableId).emit('emoji_reaction', {
+        tableId: payload.tableId,
+        playerId,
+        seatIndex,
+        emoji: payload.emoji,
+      });
     });
 
     // ── Player action ─────────────────────────────────────────────────────

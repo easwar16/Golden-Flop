@@ -14,6 +14,7 @@ import {
   Image,
   ImageBackground,
   Keyboard,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -42,6 +43,7 @@ export default function SettingsScreen() {
   const isWalletConnected = !!accounts?.length;
   const [draft, setDraft] = useState(username);
   const scrollRef = useRef<ScrollView>(null);
+  const [termsVisible, setTermsVisible] = useState(false);
   const walletPromptAnim = useRef(new Animated.Value(0)).current;
 
   const [fontsLoaded, fontError] = useFonts({ PressStart2P_400Regular });
@@ -234,7 +236,90 @@ export default function SettingsScreen() {
               <Text style={styles.walletPromptText}>⚠ Connect your wallet to join a table</Text>
             </Animated.View>
 
+            {/* Terms & Conditions */}
+            <Pressable
+              style={({ pressed }) => [styles.termsBtn, pressed && { opacity: 0.8 }]}
+              onPress={() => setTermsVisible(true)}>
+              <Text style={styles.termsBtnText}>TERMS & CONDITIONS</Text>
+            </Pressable>
+
           </ScrollView>
+
+          {/* Terms & Conditions Modal */}
+          <Modal visible={termsVisible} animationType="slide" transparent>
+            <View style={tcStyles.overlay}>
+              <View style={tcStyles.modal}>
+                <ScrollView showsVerticalScrollIndicator={false} style={tcStyles.scroll}>
+                  <Text style={tcStyles.heading}>GOLDENFLOP</Text>
+                  <Text style={tcStyles.tagline}>The Future of On-Chain Poker</Text>
+
+                  <View style={tcStyles.highlight}>
+                    <Text style={tcStyles.highlightTitle}>INDUSTRY-LOW 2.5% RAKE</Text>
+                    <Text style={tcStyles.highlightBody}>
+                      GoldenFlop charges just 2.5% rake per pot — one of the lowest rates in
+                      online poker. More of your winnings stay in your pocket. No hidden fees,
+                      no withdrawal charges, no subscription costs. Ever.
+                    </Text>
+                  </View>
+
+                  <View style={tcStyles.highlight}>
+                    <Text style={tcStyles.highlightTitle}>WHY GOLDENFLOP?</Text>
+                    <Text style={tcStyles.highlightBody}>
+                      Fully on-chain settlements on Solana. Instant deposits and withdrawals.
+                      Provably fair dealing. No custodial wallets — you control your funds at
+                      all times. Built by poker players, for poker players.
+                    </Text>
+                  </View>
+
+                  <Text style={tcStyles.sectionTitle}>Terms & Conditions</Text>
+
+                  <Text style={tcStyles.body}>
+                    1. ELIGIBILITY{'\n'}
+                    You must be at least 18 years old (or the legal age in your jurisdiction)
+                    to use GoldenFlop. By using this app you confirm you meet this requirement.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    2. ACCOUNT & WALLET{'\n'}
+                    You are solely responsible for the security of your wallet and private keys.
+                    GoldenFlop never has access to your private keys. Lost keys cannot be recovered.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    3. RAKE & FEES{'\n'}
+                    A 2.5% rake is deducted from each pot at showdown. Practice tables are
+                    rake-free. No additional platform fees apply.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    4. FAIR PLAY{'\n'}
+                    Collusion, multi-accounting, botting, and any form of cheating are strictly
+                    prohibited. Violators will be permanently banned and their balances forfeited.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    5. FUNDS & SETTLEMENTS{'\n'}
+                    All real-money games are settled on the Solana blockchain. Deposits and
+                    withdrawals are processed on-chain. GoldenFlop is non-custodial — we do
+                    not hold your funds outside of active game sessions.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    6. DISCLAIMER{'\n'}
+                    GoldenFlop is provided "as is" without warranty. We are not liable for
+                    losses resulting from blockchain network issues, wallet errors, or
+                    gameplay outcomes. Play responsibly.
+                  </Text>
+                  <Text style={tcStyles.body}>
+                    7. MODIFICATIONS{'\n'}
+                    We reserve the right to update these terms at any time. Continued use of
+                    the app constitutes acceptance of any changes.
+                  </Text>
+
+                  <View style={{ height: 20 }} />
+                </ScrollView>
+
+                <Pressable style={tcStyles.closeBtn} onPress={() => setTermsVisible(false)}>
+                  <Text style={tcStyles.closeBtnText}>CLOSE</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
         </View>
       <Animated.View style={[styles.toast, { opacity: toastOpacity, bottom: insets.bottom + 32 }]} pointerEvents="none">
         <Text style={styles.toastText}>✓ Saved</Text>
@@ -518,5 +603,72 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: gold,
     letterSpacing: 1,
+  },
+  termsBtn: {
+    width: '100%',
+    backgroundColor: panelBg,
+    borderWidth: 2,
+    borderColor: gold,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  termsBtnText: {
+    fontFamily: 'PressStart2P_400Regular',
+    fontSize: 9,
+    color: gold,
+    letterSpacing: 1,
+  },
+});
+
+const neonCyan = '#00FFFF';
+
+const tcStyles = StyleSheet.create({
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 40,
+  },
+  modal: {
+    flex: 1, width: '100%', maxWidth: 500,
+    backgroundColor: 'rgba(26,10,46,0.97)',
+    borderWidth: 2, borderColor: gold, borderRadius: 20,
+    paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16,
+  },
+  scroll: { flex: 1 },
+  heading: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 16, color: gold,
+    textAlign: 'center', marginBottom: 4,
+  },
+  tagline: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: neonCyan,
+    textAlign: 'center', marginBottom: 20, letterSpacing: 1,
+  },
+  highlight: {
+    backgroundColor: 'rgba(255,215,0,0.08)', borderWidth: 1, borderColor: 'rgba(255,215,0,0.3)',
+    borderRadius: 12, padding: 14, marginBottom: 14,
+  },
+  highlightTitle: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: gold,
+    marginBottom: 8,
+  },
+  highlightBody: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.85)',
+    lineHeight: 14,
+  },
+  sectionTitle: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold,
+    marginTop: 10, marginBottom: 14, textAlign: 'center',
+  },
+  body: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.75)',
+    lineHeight: 14, marginBottom: 14,
+  },
+  closeBtn: {
+    backgroundColor: 'rgba(255,215,0,0.15)', borderWidth: 1.5, borderColor: gold,
+    borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 10,
+  },
+  closeBtnText: {
+    fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: gold, letterSpacing: 1,
   },
 });

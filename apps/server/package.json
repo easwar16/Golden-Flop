@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc --outDir dist",
     "start": "node dist/index.js",
+    "start:cluster": "node dist/cluster.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -21,6 +22,7 @@
   "dependencies": {
     "@goldenflop/shared": "*",
     "@prisma/client": "^5.22.0",
+    "@socket.io/redis-adapter": "^8.3.0",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.0",
     "bs58": "^5.0.0",
