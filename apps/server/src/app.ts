@@ -84,6 +84,9 @@ export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
     const { prisma } = await import('./db/prisma');
     await prisma.$connect();
 
+    // Seed rooms if the database is empty
+    const { seedDatabase } = await import('./db/seed');
+    await seedDatabase();
   }
 
   const roomManager = new RoomManager(io);
