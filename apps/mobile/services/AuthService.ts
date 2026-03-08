@@ -11,7 +11,7 @@
  * This service is purely for API transport.
  */
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001';
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010';
 
 export interface AuthUser {
   id: string;

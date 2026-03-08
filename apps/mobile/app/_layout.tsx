@@ -38,7 +38,7 @@ import { WalletProvider } from '@/contexts/wallet-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MobileWalletProvider } from '@wallet-ui/react-native-web3js';
 import { clusterApiUrl } from '@solana/web3.js';
-import { APP_IDENTITY, CLUSTER } from '@/constants/solana';
+import { APP_IDENTITY, CLUSTER, SOLANA_NETWORK } from '@/constants/solana';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Video splash overlay — plays once then fades out
@@ -129,7 +129,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <MobileWalletProvider
         chain={CLUSTER}
-        endpoint={clusterApiUrl('devnet')}
+        endpoint={clusterApiUrl(SOLANA_NETWORK)}
         identity={APP_IDENTITY}>
       <WalletProvider>
         <SocketProvider>

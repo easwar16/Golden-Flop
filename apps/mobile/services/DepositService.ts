@@ -20,8 +20,9 @@ import {
   clusterApiUrl,
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
+import { SOLANA_NETWORK } from '@/constants/solana';
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001';
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010';
 
 // ─── Treasury info ────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ function getConnection(network: 'devnet' | 'mainnet-beta'): Connection {
 export async function buildSOLDepositTransaction(
   fromAddress: string,
   lamports: number,
-  network: 'devnet' | 'mainnet-beta' = 'devnet',
+  network: 'devnet' | 'mainnet-beta' = SOLANA_NETWORK,
 ): Promise<Transaction> {
   const info = await fetchTreasuryInfo();
   const connection = getConnection(network);
@@ -88,7 +89,7 @@ export async function buildSPLDepositTransaction(
   fromAddress: string,
   amount: bigint,
   decimals: number = 9,
-  network: 'devnet' | 'mainnet-beta' = 'devnet',
+  network: 'devnet' | 'mainnet-beta' = SOLANA_NETWORK,
 ): Promise<Transaction> {
   // Dynamic import — avoids bundling the full spl-token library if not needed
   const { getAssociatedTokenAddress, createTransferCheckedInstruction } =
@@ -192,7 +193,10 @@ interface VaultInfo {
  * @returns Vault public key + network info
  */
 export async function fetchVaultAddress(roomId: string): Promise<VaultInfo> {
-  const res = await fetch(`${SERVER_URL}/api/vault/${encodeURIComponent(roomId)}/address`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  const res = await fetch(`${SERVER_URL}/api/vault/${encodeURIComponent(roomId)}/address`, { signal: controller.signal });
+  clearTimeout(timer);
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as Record<string, unknown>;
     throw new Error((err.error as string) ?? `Failed to fetch vault address (${res.status})`);

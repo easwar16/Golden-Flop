@@ -143,21 +143,21 @@ interface SeekerTier {
 }
 
 const SEEKER_TIERS: SeekerTier[] = [
-  // Micro — min 50 SEEKER (very low friction)
-  { prefix: 'seeker-micro-a', smallBlind: 1n,    bigBlind: 2n,      minBuyIn: 50n,       maxBuyIn: 500n,       turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-micro-b', smallBlind: 1n,    bigBlind: 2n,      minBuyIn: 50n,       maxBuyIn: 800n,       turnTimeoutMs: 45_000, isPremium: false },
-  // Low — min 200 SEEKER
-  { prefix: 'seeker-low-a',   smallBlind: 2n,    bigBlind: 5n,      minBuyIn: 200n,      maxBuyIn: 2_000n,     turnTimeoutMs: 45_000, isPremium: false },
-  { prefix: 'seeker-low-b',   smallBlind: 2n,    bigBlind: 5n,      minBuyIn: 200n,      maxBuyIn: 2_500n,     turnTimeoutMs: 45_000, isPremium: false },
-  // Mid — min 1000 SEEKER
-  { prefix: 'seeker-mid-a',   smallBlind: 10n,   bigBlind: 20n,     minBuyIn: 1_000n,    maxBuyIn: 10_000n,    turnTimeoutMs: 30_000, isPremium: false },
-  { prefix: 'seeker-mid-b',   smallBlind: 10n,   bigBlind: 20n,     minBuyIn: 1_000n,    maxBuyIn: 15_000n,    turnTimeoutMs: 30_000, isPremium: false },
-  // High — min 5000 SEEKER
-  { prefix: 'seeker-high-a',  smallBlind: 50n,   bigBlind: 100n,    minBuyIn: 5_000n,    maxBuyIn: 50_000n,    turnTimeoutMs: 15_000, isPremium: false },
-  { prefix: 'seeker-high-b',  smallBlind: 50n,   bigBlind: 100n,    minBuyIn: 5_000n,    maxBuyIn: 75_000n,    turnTimeoutMs: 15_000, isPremium: false },
-  // VIP — min 25K SEEKER
-  { prefix: 'seeker-vip-a',   smallBlind: 250n,  bigBlind: 500n,    minBuyIn: 25_000n,   maxBuyIn: 250_000n,   turnTimeoutMs: 15_000, isPremium: true  },
-  { prefix: 'seeker-vip-b',   smallBlind: 500n,  bigBlind: 1_000n,  minBuyIn: 50_000n,   maxBuyIn: 500_000n,   turnTimeoutMs: 15_000, isPremium: true  },
+  // Micro — min 200 SEEKER
+  { prefix: 'seeker-micro-a', smallBlind: 4n,      bigBlind: 8n,        minBuyIn: 200n,        maxBuyIn: 2_000n,       turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-micro-b', smallBlind: 4n,      bigBlind: 8n,        minBuyIn: 200n,        maxBuyIn: 3_200n,       turnTimeoutMs: 45_000, isPremium: false },
+  // Low — min 800 SEEKER
+  { prefix: 'seeker-low-a',   smallBlind: 8n,      bigBlind: 20n,       minBuyIn: 800n,        maxBuyIn: 8_000n,       turnTimeoutMs: 45_000, isPremium: false },
+  { prefix: 'seeker-low-b',   smallBlind: 8n,      bigBlind: 20n,       minBuyIn: 800n,        maxBuyIn: 10_000n,      turnTimeoutMs: 45_000, isPremium: false },
+  // Mid — min 4,000 SEEKER
+  { prefix: 'seeker-mid-a',   smallBlind: 40n,     bigBlind: 80n,       minBuyIn: 4_000n,      maxBuyIn: 40_000n,      turnTimeoutMs: 30_000, isPremium: false },
+  { prefix: 'seeker-mid-b',   smallBlind: 40n,     bigBlind: 80n,       minBuyIn: 4_000n,      maxBuyIn: 60_000n,      turnTimeoutMs: 30_000, isPremium: false },
+  // High — min 20,000 SEEKER
+  { prefix: 'seeker-high-a',  smallBlind: 200n,    bigBlind: 400n,      minBuyIn: 20_000n,     maxBuyIn: 200_000n,     turnTimeoutMs: 15_000, isPremium: false },
+  { prefix: 'seeker-high-b',  smallBlind: 200n,    bigBlind: 400n,      minBuyIn: 20_000n,     maxBuyIn: 300_000n,     turnTimeoutMs: 15_000, isPremium: false },
+  // VIP — min 100K SEEKER
+  { prefix: 'seeker-vip-a',   smallBlind: 1_000n,  bigBlind: 2_000n,    minBuyIn: 100_000n,    maxBuyIn: 1_000_000n,   turnTimeoutMs: 15_000, isPremium: true  },
+  { prefix: 'seeker-vip-b',   smallBlind: 2_000n,  bigBlind: 4_000n,    minBuyIn: 200_000n,    maxBuyIn: 2_000_000n,   turnTimeoutMs: 15_000, isPremium: true  },
 ];
 
 // Distribution: 50 SEEKER tables
@@ -171,9 +171,9 @@ const SEEKER_DISTRIBUTION: Record<string, number> = {
 
 // Turbo SEEKER tables: 5 tables
 const SEEKER_TURBO = [
-  { prefix: 'seeker-turbo-low',  sb: 2n,   bb: 5n,    min: 200n,    max: 2_000n,   count: 2 },
-  { prefix: 'seeker-turbo-mid',  sb: 10n,  bb: 20n,   min: 1_000n,  max: 10_000n,  count: 2 },
-  { prefix: 'seeker-turbo-high', sb: 50n,  bb: 100n,  min: 5_000n,  max: 50_000n,  count: 1 },
+  { prefix: 'seeker-turbo-low',  sb: 8n,    bb: 20n,    min: 800n,     max: 8_000n,    count: 2 },
+  { prefix: 'seeker-turbo-mid',  sb: 40n,   bb: 80n,    min: 4_000n,   max: 40_000n,   count: 2 },
+  { prefix: 'seeker-turbo-high', sb: 200n,  bb: 400n,   min: 20_000n,  max: 200_000n,  count: 1 },
 ];
 
 function generateSeekerRooms(): RoomDef[] {

@@ -13,7 +13,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -426,7 +425,7 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </Pressable>
             </View>
 
-            <Text style={styles.tableDetailLabel}>
+            <Text style={styles.tableDetailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
               Blinds: <Text style={styles.tableDetailNum}>
                 {isPractice
                   ? `${t.smallBlind}/${t.bigBlind} chips`
@@ -453,6 +452,10 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </Text>
             </Text>
 
+            {!expanded && (
+              <Text style={styles.tapHint}>Tap for more details</Text>
+            )}
+
             {expanded && (
               <View style={styles.expandedBlock}>
                 <View style={styles.expandedRow}>
@@ -469,9 +472,6 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
                   <Text style={styles.expandedLabel}>SEATS LEFT</Text>
                   <Text style={styles.expandedValue}>{(t.maxPlayers ?? MAX_PLAYERS) - t.playerCount}</Text>
                 </View>
-                <Pressable onPress={onShowDetails} style={styles.detailsBtn}>
-                  <Text style={styles.detailsBtnText}>ROOM INFO</Text>
-                </Pressable>
               </View>
             )}
           </View>
@@ -505,6 +505,7 @@ const TableCard = React.memo(function TableCard({ t, name, tier, badge, pressedI
               </ImageBackground>
             </Pressable>
           </View>
+
         </View>
       </Pressable>
     </Reanimated.View>
@@ -654,7 +655,6 @@ export default function LobbyScreen() {
   const [pressedJoinTableId, setPressedJoinTableId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailsRow, setDetailsRow] = useState<DisplayRow | null>(null);
-  const [termsVisible, setTermsVisible] = useState(false);
 
   // Create form (hidden behind feature flag)
   const [showCreate] = useState(false);
@@ -705,6 +705,15 @@ export default function LobbyScreen() {
 
   const [solBalance, setSolBalance] = useState<string | null>(null);
   const [seekerBalance, setSeekerBalance] = useState<string | null>(null);
+  const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
+  useFocusEffect(useCallback(() => {
+    setBalanceRefreshKey((k) => k + 1);
+  }, []));
+
+  // Table category memos — must be declared before the balance effect that references seekerTables
+  const solTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType !== 'SEEKER'), [tables]);
+  const seekerTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType === 'SEEKER'), [tables]);
+
   useEffect(() => {
     if (!addressBase58) { setSolBalance(null); setSeekerBalance(null); return; }
     let cancelled = false;
@@ -720,7 +729,7 @@ export default function LobbyScreen() {
           const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
           const seekerMintStr = seekerTables.length > 0
             ? await (async () => {
-                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001'}/api/vault/${seekerTables[0].id}/address`);
+                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010'}/api/vault/${seekerTables[0].id}/address`);
                 if (!res.ok) return null;
                 const data = await res.json() as { seekerMint?: string };
                 return data.seekerMint ?? null;
@@ -745,12 +754,8 @@ export default function LobbyScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [addressBase58, deauthorize, signOut, seekerTables]);
+  }, [addressBase58, deauthorize, signOut, seekerTables, balanceRefreshKey]);
 
-  // Table names are computed once per render cycle; reset counter first
-  // Only compute for non-practice tables (practice tables use PRACTICE_NAMES)
-  const solTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType !== 'SEEKER'), [tables]);
-  const seekerTables = useMemo(() => tables.filter((t) => !t.isPractice && t.tokenType === 'SEEKER'), [tables]);
   const tableNames = useMemo(() => {
     const counts: Record<string, number> = {};
     return solTables.map((t) => {
@@ -937,9 +942,6 @@ export default function LobbyScreen() {
               <Text style={[styles.walletStatusText, { color: '#FF6B6B' }]}>NOT{'\n'}CONNECTED</Text>
             </Pressable>
           )}
-          <Pressable onPress={() => setTermsVisible(true)} style={styles.termsBtn}>
-            <MaterialCommunityIcons name="file-document-outline" size={16} color={gold} />
-          </Pressable>
         </View>
 
         {/* Quick Join */}
@@ -1052,136 +1054,9 @@ export default function LobbyScreen() {
         )}
       </View>
 
-      {/* Terms & Conditions Modal */}
-      <Modal visible={termsVisible} animationType="slide" transparent>
-        <View style={tcStyles.overlay}>
-          <View style={tcStyles.modal}>
-            <ScrollView showsVerticalScrollIndicator={false} style={tcStyles.scroll}>
-              <Text style={tcStyles.heading}>GOLDENFLOP</Text>
-              <Text style={tcStyles.tagline}>The Future of On-Chain Poker</Text>
-
-              <View style={tcStyles.highlight}>
-                <Text style={tcStyles.highlightTitle}>INDUSTRY-LOW 2.5% RAKE</Text>
-                <Text style={tcStyles.highlightBody}>
-                  GoldenFlop charges just 2.5% rake per pot — one of the lowest rates in
-                  online poker. More of your winnings stay in your pocket. No hidden fees,
-                  no withdrawal charges, no subscription costs. Ever.
-                </Text>
-              </View>
-
-              <View style={tcStyles.highlight}>
-                <Text style={tcStyles.highlightTitle}>WHY GOLDENFLOP?</Text>
-                <Text style={tcStyles.highlightBody}>
-                  Fully on-chain settlements on Solana. Instant deposits and withdrawals.
-                  Provably fair dealing. No custodial wallets — you control your funds at
-                  all times. Built by poker players, for poker players.
-                </Text>
-              </View>
-
-              <Text style={tcStyles.sectionTitle}>Terms & Conditions</Text>
-
-              <Text style={tcStyles.body}>
-                1. ELIGIBILITY{'\n'}
-                You must be at least 18 years old (or the legal age in your jurisdiction)
-                to use GoldenFlop. By using this app you confirm you meet this requirement.
-              </Text>
-              <Text style={tcStyles.body}>
-                2. ACCOUNT & WALLET{'\n'}
-                You are solely responsible for the security of your wallet and private keys.
-                GoldenFlop never has access to your private keys. Lost keys cannot be recovered.
-              </Text>
-              <Text style={tcStyles.body}>
-                3. RAKE & FEES{'\n'}
-                A 2.5% rake is deducted from each pot at showdown. Practice tables are
-                rake-free. No additional platform fees apply.
-              </Text>
-              <Text style={tcStyles.body}>
-                4. FAIR PLAY{'\n'}
-                Collusion, multi-accounting, botting, and any form of cheating are strictly
-                prohibited. Violators will be permanently banned and their balances forfeited.
-              </Text>
-              <Text style={tcStyles.body}>
-                5. FUNDS & SETTLEMENTS{'\n'}
-                All real-money games are settled on the Solana blockchain. Deposits and
-                withdrawals are processed on-chain. GoldenFlop is non-custodial — we do
-                not hold your funds outside of active game sessions.
-              </Text>
-              <Text style={tcStyles.body}>
-                6. DISCLAIMER{'\n'}
-                GoldenFlop is provided "as is" without warranty. We are not liable for
-                losses resulting from blockchain network issues, wallet errors, or
-                gameplay outcomes. Play responsibly.
-              </Text>
-              <Text style={tcStyles.body}>
-                7. MODIFICATIONS{'\n'}
-                We reserve the right to update these terms at any time. Continued use of
-                the app constitutes acceptance of any changes.
-              </Text>
-
-              <View style={{ height: 20 }} />
-            </ScrollView>
-
-            <Pressable style={tcStyles.closeBtn} onPress={() => setTermsVisible(false)}>
-              <Text style={tcStyles.closeBtnText}>CLOSE</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
     </View>
   );
 }
-
-// ─── Terms & Conditions styles ─────────────────────────────────────────────────
-
-const tcStyles = StyleSheet.create({
-  overlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 40,
-  },
-  modal: {
-    flex: 1, width: '100%', maxWidth: 500,
-    backgroundColor: 'rgba(26,10,46,0.97)',
-    borderWidth: 2, borderColor: '#FFD700', borderRadius: 20,
-    paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16,
-  },
-  scroll: { flex: 1 },
-  heading: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 16, color: '#FFD700',
-    textAlign: 'center', marginBottom: 4,
-  },
-  tagline: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: '#00FFFF',
-    textAlign: 'center', marginBottom: 20, letterSpacing: 1,
-  },
-  highlight: {
-    backgroundColor: 'rgba(255,215,0,0.08)', borderWidth: 1, borderColor: 'rgba(255,215,0,0.3)',
-    borderRadius: 12, padding: 14, marginBottom: 14,
-  },
-  highlightTitle: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 9, color: '#FFD700',
-    marginBottom: 8,
-  },
-  highlightBody: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.85)',
-    lineHeight: 14,
-  },
-  sectionTitle: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: '#FFD700',
-    marginTop: 10, marginBottom: 14, textAlign: 'center',
-  },
-  body: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.75)',
-    lineHeight: 14, marginBottom: 14,
-  },
-  closeBtn: {
-    backgroundColor: 'rgba(255,215,0,0.15)', borderWidth: 1.5, borderColor: '#FFD700',
-    borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 10,
-  },
-  closeBtnText: {
-    fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: '#FFD700', letterSpacing: 1,
-  },
-});
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -1203,7 +1078,6 @@ const styles = StyleSheet.create({
   },
   backBtn: { paddingVertical: 6, paddingHorizontal: 8, marginRight: 8 },
   backBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 14, color: gold },
-  termsBtn: { paddingVertical: 6, paddingHorizontal: 8, marginLeft: 8 },
   headerTitle: { paddingTop: 10, fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 14 : 12, color: gold, letterSpacing: 1 },
   walletBadge: {
     flexDirection: 'row', alignItems: 'center',
@@ -1272,7 +1146,7 @@ const styles = StyleSheet.create({
 
   // Table card
   tableCard: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between',
     backgroundColor: panelBg, borderRadius: 16, borderWidth: 2, padding: 14, overflow: 'hidden',
   },
   vipRim: {
@@ -1290,28 +1164,31 @@ const styles = StyleSheet.create({
   },
   tableCardBody: { flex: 1, minWidth: 0, gap: 5 },
   cardRight: { alignItems: 'center', gap: 8, marginLeft: 10 },
-  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginBottom: 2 },
   tableNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2, flexWrap: 'nowrap' },
   tableName: { fontFamily: 'PressStart2P_400Regular', fontSize: Platform.OS === 'web' ? 14 : 12, color: gold, letterSpacing: 0.5, flexShrink: 1, minWidth: 0 },
   copyIdBtn: { padding: 4, marginBottom: 8},
-  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginBottom: 2 },
   tierBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
   tierBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, letterSpacing: 0.5 },
   tableBadge: { borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
   tableBadgeText: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, letterSpacing: 0.3 },
   tableDetail: { fontFamily: 'PressStart2P_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.9)' },
   tableDetailLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FFFF', marginBottom: 2 },
-  tableDetailNum: { fontSize: 7, color: 'rgba(255,255,255,0.75)' },
+  tableDetailNum: { fontSize: 8, color: 'rgba(255,255,255,0.9)' },
   tableDetailHot: { color: '#FF9A6C' },
   tableRow: { flexDirection: 'row', alignItems: 'center', gap: 7 , marginBottom: 2},
   statusDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 5},
+  tapHint: { fontFamily: 'PressStart2P_400Regular', fontSize: 6, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
   expandedBlock: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', gap: 5 },
   expandedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  expandedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.5)' },
-  expandedValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: 'rgba(255,255,255,0.9)' },
+  expandedLabel: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: '#00FFFF' },
+  expandedValue: { fontFamily: 'PressStart2P_400Regular', fontSize: 8, color: 'rgba(255,255,255,0.95)' },
   detailsBtn: {
-    marginTop: 4, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 10,
+    paddingVertical: 5, paddingHorizontal: 10,
     borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,215,0,0.4)', backgroundColor: 'rgba(255,215,0,0.08)',
+  },
+  detailsBtnRow: {
+    width: '100%', alignItems: 'flex-end', marginTop: 4,
   },
   detailsBtnText: { fontFamily: 'PressStart2P_400Regular', fontSize: 7, color: gold, letterSpacing: 0.5 },
 

@@ -782,7 +782,7 @@ const woStyles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject, zIndex: 20,
     justifyContent: 'center', alignItems: 'center',
-    top: '35%', bottom: '35%',
+    top: '25%', bottom: '35%',
   },
   box: {
     backgroundColor: 'rgba(26,10,46,0.88)',
@@ -1619,7 +1619,7 @@ export default function TableScreen() {
                       ? <PokerCard card={card} style={styles.cardSize} onMagnifyStart={setMagnifyInfo} onMagnifyEnd={() => setMagnifyInfo(null)} />
                       : showBack
                         ? <PokerCard card={null} faceDown style={styles.cardSize} />
-                        : <View style={styles.emptyCard} />}
+                        : null}
                   </View>
                 );
               })}

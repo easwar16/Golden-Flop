@@ -94,7 +94,15 @@ function WalletBridge({ children }: { children: React.ReactNode }) {
   const signAndSendTransaction = useCallback(
     async (transaction: Transaction | VersionedTransaction, minContextSlot?: number): Promise<string> => {
       if (!account) throw new Error('Wallet not connected');
-      return await mwaSignAndSend(transaction, minContextSlot ?? 0);
+      // Timeout guard — MWA can hang if the user dismisses the wallet dialog
+      const TIMEOUT_MS = 30_000;
+      const result = await Promise.race([
+        mwaSignAndSend(transaction, minContextSlot ?? 0),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Wallet request timed out. Please try again.')), TIMEOUT_MS),
+        ),
+      ]);
+      return result;
     },
     [account, mwaSignAndSend],
   );

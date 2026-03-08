@@ -265,8 +265,8 @@ export const useGameStore = create<NetworkSlice & UISlice & GameActions>()(
         reservedSeats: payload.reservedSeats ?? [],
         tokenType: payload.tokenType ?? null,
         isJoining: false,
-        // Reset raise amount to min on each new state if it's our turn
-        raiseAmount: payload.isMyTurn ? Math.min(payload.minRaise, payload.maxRaise) : get().raiseAmount,
+        // Reset raise input to minRaise whenever it becomes our turn
+        raiseAmount: payload.isMyTurn ? payload.minRaise : get().raiseAmount,
       });
     },
 

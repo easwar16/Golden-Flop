@@ -36,7 +36,7 @@ export interface AppInstance {
 }
 
 export async function createApp(opts: AppOptions = {}): Promise<AppInstance> {
-  const { skipBootstrap = false, skipRedis = false, corsOrigin = '*', skipDb = false } = opts;
+  const { skipBootstrap = false, skipRedis = false, corsOrigin = process.env.CORS_ORIGIN ?? '*', skipDb = false } = opts;
 
   const app = express();
   app.use(cors({ origin: corsOrigin }));

@@ -17,9 +17,9 @@ import { playChipToss, playCardShuffle, playWinCoins } from './SoundService';
 
 // ─── Server address ───────────────────────────────────────────────────────────
 // Set EXPO_PUBLIC_SERVER_URL in .env.local (gitignored).
-// Physical device: use your machine's LAN IP, e.g. http://192.168.x.x:4001
-// Simulator/emulator: http://localhost:4001
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4001';
+// Physical device: use your machine's LAN IP, e.g. http://192.168.x.x:4010
+// Simulator/emulator: http://localhost:4010
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010';
 
 // ─── Types (mirrors @goldenflop/shared events) ────────────────────────────────
 

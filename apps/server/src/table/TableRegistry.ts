@@ -114,6 +114,9 @@ export class TableRegistry {
         chips: p.chips,
         seatIndex: p.seatIndex,
         isConnected: false,   // treated as disconnected until they reconnect
+        presenceState: 'disconnected',
+        sitOutTimer: null,
+        sitOutTimeoutAt: null,
       });
     }
   }

@@ -12,7 +12,7 @@ export const APP_IDENTITY = {
  * Must match the server's SOLANA_NETWORK env var.
  * Change to 'solana:mainnet-beta' for production.
  */
-export const CLUSTER = 'solana:devnet' as const;
+export const CLUSTER = 'solana:mainnet-beta' as const;
 
 /**
  * Network name for @solana/web3.js clusterApiUrl().
