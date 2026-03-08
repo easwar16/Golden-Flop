@@ -5,13 +5,13 @@ module.exports = {
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
   moduleNameMapper: {
-    '^@goldenflop/shared$': '<rootDir>/../../packages/shared/src/index.ts',
+    '^@goldenflop/shared$': '<rootDir>/../../packages/shared/dist/index.js',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: {
         paths: {
-          '@goldenflop/shared': ['../../packages/shared/src/index.ts'],
+          '@goldenflop/shared': ['../../packages/shared/dist/index.js'],
         },
       },
     }],
