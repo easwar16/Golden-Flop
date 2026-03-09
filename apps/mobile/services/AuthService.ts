@@ -11,7 +11,7 @@
  * This service is purely for API transport.
  */
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010';
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'https://api.gldnflp.easwar.me';
 
 export interface AuthUser {
   id: string;

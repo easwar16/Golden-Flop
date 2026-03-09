@@ -22,7 +22,7 @@ import {
 } from '@solana/web3.js';
 import { SOLANA_NETWORK } from '@/constants/solana';
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010';
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL ?? 'https://api.gldnflp.easwar.me';
 
 // ─── Treasury info ────────────────────────────────────────────────────────────
 

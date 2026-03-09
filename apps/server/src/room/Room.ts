@@ -42,6 +42,18 @@ import { recordHandResult } from '../services/game.service';
 import { getRoom as getRoomConfig } from '../services/room.service';
 import { processRakeTransfer } from '../solana/PayoutService';
 import { settlePlayerBalance } from '../balance/settlePlayerBalance';
+import {
+  decide,
+  getActionDelay,
+  type BotDecisionInput,
+} from '../bot/BotPlayer';
+import {
+  scheduleBot,
+  onHumanLeft,
+  onHandFinished,
+  isBotSocket,
+  getBot,
+} from '../bot/BotManager';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -110,6 +122,10 @@ export class Room {
   private socketToSeat: Map<string, number> = new Map();
   /** seatIndex → SeatReservation (pre-wallet-tx locks) */
   private reservations: Map<number, SeatReservation> = new Map();
+  /** Synthetic socket IDs belonging to bots (never hit real socket.io lookups). */
+  private botSocketIds: Set<string> = new Set();
+  /** Active bot action timer (so we can cancel on cleanup). */
+  private botActionTimer: ReturnType<typeof setTimeout> | null = null;
 
   private handState: HandState | null = null;
   private dealerSeatIndex = 0;
@@ -295,6 +311,202 @@ export class Room {
     }
   }
 
+  // ─── Bot integration ─────────────────────────────────────────────────────
+
+  /**
+   * Add a bot player to the table (practice tables only).
+   * Bot has no real socket — uses a synthetic socketId.
+   */
+  addBot(botId: string, botName: string, avatarSeed: string, buyIn: number, botSocketId: string): string | null {
+    if (this.seats.size >= this.config.maxPlayers) return 'Table is full';
+
+    // Prevent double-seating
+    for (const p of this.seats.values()) {
+      if (p.id === botId) return 'Bot already seated';
+    }
+
+    // Find first available seat
+    const takenSeats = new Set(this.seats.keys());
+    let seatIndex = -1;
+    for (let i = 0; i < this.config.maxPlayers; i++) {
+      if (!takenSeats.has(i)) { seatIndex = i; break; }
+    }
+    if (seatIndex === -1) return 'No available seat';
+
+    const player: RoomPlayer = {
+      id: botId,
+      socketId: botSocketId,
+      name: botName,
+      avatarSeed,
+      chips: buyIn,
+      seatIndex,
+      isConnected: true,
+      presenceState: 'active',
+      sitOutTimer: null,
+      sitOutTimeoutAt: null,
+      userId: null,
+      walletAddress: null,
+      isVaultPlayer: false,
+    };
+
+    this.seats.set(seatIndex, player);
+    this.socketToSeat.set(botSocketId, seatIndex);
+    this.botSocketIds.add(botSocketId);
+
+    void this.persistSeats();
+
+    this.io.to(this.id).emit('player_joined', {
+      tableId: this.id,
+      playerId: botId,
+      playerName: botName,
+      seatIndex,
+      chips: buyIn,
+    });
+
+    this.broadcastState();
+
+    // Start countdown if we now have 2+ active players
+    if (this.getActivePlayerCount() >= 2 && !this.handState && !this.countdownTimer) {
+      this.startCountdown();
+    }
+
+    return null;
+  }
+
+  /**
+   * Remove a bot player from the table.
+   */
+  removeBot(botSocketId: string): void {
+    const seatIndex = this.socketToSeat.get(botSocketId);
+    if (seatIndex === undefined) return;
+
+    const player = this.seats.get(seatIndex);
+    if (!player) return;
+
+    // If bot is in an active hand, fold them
+    if (this.handState) {
+      const ep = this.handState.players.find(p => p.id === player.id);
+      if (ep && !ep.isFolded && !ep.isAllIn) {
+        const ap = activePlayer(this.handState);
+        if (ap?.id === player.id) {
+          this.handleAutoFold(player.id);
+        } else {
+          ep.isFolded = true;
+          const remaining = this.handState.players.filter(p => !p.isFolded);
+          if (remaining.length <= 1) {
+            this.clearTurnTimer();
+            this.finishHand();
+          }
+        }
+      }
+    }
+
+    this.clearBotActionTimer();
+    this.seats.delete(seatIndex);
+    this.socketToSeat.delete(botSocketId);
+    this.botSocketIds.delete(botSocketId);
+
+    void this.persistSeats();
+
+    this.io.to(this.id).emit('player_left', {
+      tableId: this.id,
+      playerId: player.id,
+      seatIndex,
+    });
+
+    if (this.getActivePlayerCount() < 2 && this.countdownTimer) {
+      this.clearCountdown();
+    }
+
+    this.broadcastState();
+  }
+
+  /** Whether a socketId belongs to a bot. */
+  private isBot(socketId: string): boolean {
+    return this.botSocketIds.has(socketId);
+  }
+
+  /**
+   * Schedule the bot to take an action after a human-like delay.
+   * Called by startTurnTimer when the active player is a bot.
+   */
+  private scheduleBotAction(): void {
+    this.clearBotActionTimer();
+    if (!this.handState) return;
+
+    const ap = activePlayer(this.handState);
+    if (!ap) return;
+
+    const seat = [...this.seats.values()].find(p => p.id === ap.id);
+    if (!seat || !this.isBot(seat.socketId)) return;
+
+    const delay = getActionDelay();
+
+    this.botActionTimer = setTimeout(() => {
+      this.botActionTimer = null;
+      this.executeBotAction(ap.id);
+    }, delay);
+  }
+
+  private executeBotAction(botPlayerId: string): void {
+    if (!this.handState) return;
+
+    const ap = activePlayer(this.handState);
+    if (!ap || ap.id !== botPlayerId) return;
+
+    const input: BotDecisionInput = {
+      holeCards: ap.holeCards as [import('@goldenflop/shared').CardValue, import('@goldenflop/shared').CardValue],
+      communityCards: this.handState.communityCards,
+      phase: this.handState.phase,
+      pot: this.handState.pot,
+      currentBet: this.handState.currentBet,
+      myCurrentBet: ap.currentBet,
+      myChips: ap.chips,
+      bigBlind: this.config.bigBlind,
+    };
+
+    const decision = decide(input);
+
+    let result;
+    try {
+      result = processAction(this.handState, botPlayerId, decision.action, decision.amount);
+    } catch {
+      // Fallback: if the decision is invalid, fold
+      try {
+        result = processAction(this.handState, botPlayerId, 'fold');
+      } catch {
+        return;
+      }
+    }
+
+    this.clearTurnTimer();
+    this.handState = result.state;
+
+    this.io.to(this.id).emit('action_ack', {
+      tableId: this.id,
+      playerId: botPlayerId,
+      action: decision.action,
+      amount: result.amount,
+    });
+
+    if (result.handComplete) {
+      this.finishHand();
+    } else if (result.roundComplete) {
+      this.handState = advancePhase(this.handState);
+      this.afterAdvance();
+    } else {
+      this.broadcastState();
+      this.startTurnTimer();
+    }
+  }
+
+  private clearBotActionTimer(): void {
+    if (this.botActionTimer) {
+      clearTimeout(this.botActionTimer);
+      this.botActionTimer = null;
+    }
+  }
+
   // ─── Join / Leave / Reconnect ─────────────────────────────────────────────
 
   /**
@@ -393,6 +605,11 @@ export class Room {
       this.startCountdown();
     }
 
+    // Practice tables: schedule a bot if this is the only human
+    if (this.config.isPractice) {
+      scheduleBot(this);
+    }
+
     return null;
   }
 
@@ -464,6 +681,11 @@ export class Room {
     const activeCount = this.getActivePlayerCount();
     if (activeCount < 2 && this.countdownTimer) {
       this.clearCountdown();
+    }
+
+    // Practice tables: handle bot lifecycle when a human leaves
+    if (this.config.isPractice && !this.isBot(socketId)) {
+      onHumanLeft(this);
     }
 
     this.broadcastState();
@@ -795,6 +1017,18 @@ export class Room {
     // Remove busted players (0 chips) from their seat but keep them as spectators
     for (const [seatIndex, player] of this.seats) {
       if (player.chips <= 0) {
+        // Bots just get removed silently — no socket to notify
+        if (this.isBot(player.socketId)) {
+          this.socketToSeat.delete(player.socketId);
+          this.botSocketIds.delete(player.socketId);
+          this.seats.delete(seatIndex);
+          this.io.to(this.id).emit('player_left', {
+            tableId: this.id,
+            playerId: player.id,
+            seatIndex,
+          });
+          continue;
+        }
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
           // Notify the player they busted out — they stay connected as a spectator
@@ -816,6 +1050,11 @@ export class Room {
 
     // Persist updated chip counts to Redis
     void this.persistSeats();
+
+    // Practice tables: handle bot lifecycle after hand
+    if (this.config.isPractice) {
+      onHandFinished(this);
+    }
 
     // Start next hand after delay if enough ACTIVE players remain
     if (this.getActivePlayerCount() >= 2) {
@@ -859,8 +1098,16 @@ export class Room {
     const ap = activePlayer(this.handState);
     if (!ap) return;
 
-    // If the active player is disconnected or sitting out, auto-fold after a brief delay
     const seat = [...this.seats.values()].find(p => p.id === ap.id);
+
+    // If the active player is a bot, schedule bot action instead of turn timer
+    if (seat && this.isBot(seat.socketId)) {
+      this.broadcastState();
+      this.scheduleBotAction();
+      return;
+    }
+
+    // If the active player is disconnected or sitting out, auto-fold after a brief delay
     if (seat && seat.presenceState !== 'active') {
       this.broadcastState();
       this.turnTimer = setTimeout(() => {
@@ -902,6 +1149,7 @@ export class Room {
       this.turnTimer = null;
     }
     this.turnTimeoutAt = null;
+    this.clearBotActionTimer();
   }
 
   private handleAutoFold(playerId: string): void {
@@ -942,6 +1190,11 @@ export class Room {
 
     for (const player of this.seats.values()) {
       if (!player.isConnected) continue;
+      // Skip bots — they have no real socket
+      if (this.isBot(player.socketId)) {
+        seatedSocketIds.add(player.socketId);
+        continue;
+      }
       const socket = this.io.sockets.sockets.get(player.socketId);
       if (socket) {
         this.emitStateTo(socket);
@@ -1013,6 +1266,7 @@ export class Room {
           sitOutTimeoutAt: roomPlayer.sitOutTimeoutAt,
           currentBet: ep?.currentBet ?? 0,
           holeCards,
+          isBot: this.isBot(roomPlayer.socketId) || undefined,
         };
       }
     );
