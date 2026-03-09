@@ -929,7 +929,12 @@ export default function LobbyScreen() {
             <Text style={styles.backBtnText}>{'<'}</Text>
           </Pressable>
           <Text style={styles.headerTitle}>TABLES</Text>
-          {isWalletConnected ? (
+          {activeTab === 'PRACTICE' ? (
+            <View style={[styles.walletBadge, { borderColor: 'rgba(255,215,0,0.5)' }]}>
+              <Text style={{ marginBottom: 4, fontSize: 20, color: gold, includeFontPadding: false }}>∞</Text>
+              <Text style={[styles.walletStatusText, { color: gold, includeFontPadding: false }]}>CHIPS</Text>
+            </View>
+          ) : isWalletConnected ? (
             <View style={styles.walletBadge}>
               <View style={[styles.walletDot, { backgroundColor: activeTab === 'SEEKER' ? '#B388FF' : '#22c55e' }]} />
               <Text style={[styles.walletStatusText, { color: activeTab === 'SEEKER' ? '#B388FF' : '#22c55e' }]}>

@@ -67,6 +67,8 @@ export interface SeatView {
   currentBet: number;   // amount bet in this betting round
   /** Hole cards: present only for recipient or at showdown */
   holeCards: (CardValue | null)[];
+  /** Whether this player is a practice bot */
+  isBot?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

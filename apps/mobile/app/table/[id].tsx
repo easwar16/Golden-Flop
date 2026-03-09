@@ -501,7 +501,7 @@ const BuyInModal = memo(function BuyInModal({
 }: BuyInModalProps) {
   const isSeeker = tokenType === 'SEEKER';
   // Input is in SOL (e.g. "0.05") or SEEKER units, converted to smallest unit on confirm
-  const [amount, setAmount] = useState(isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
+  const [amount, setAmount] = useState(isPractice || isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
   const avatarSeed = useUserStore((s) => s.avatarSeed);
   const username = useUserStore((s) => s.username);
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
@@ -514,7 +514,7 @@ const BuyInModal = memo(function BuyInModal({
   // Reset to min whenever the modal opens for a new seat
   useEffect(() => {
     if (visible) {
-      setAmount(isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
+      setAmount(isPractice || isSeeker ? String(minBuyIn) : lamportsToSol(minBuyIn));
       hasReservationRef.current = false;
     }
   }, [visible, minBuyIn, isSeeker]);
@@ -646,8 +646,8 @@ const BuyInModal = memo(function BuyInModal({
                 <TextInput
                   style={bimStyles.input}
                   value={amount}
-                  onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
-                  keyboardType="decimal-pad"
+                  onChangeText={(t) => setAmount(isPractice || isSeeker ? t.replace(/[^0-9]/g, '') : t.replace(/[^0-9.]/g, ''))}
+                  keyboardType={isPractice || isSeeker ? 'number-pad' : 'decimal-pad'}
                   selectTextOnFocus
                   placeholderTextColor="rgba(255,255,255,0.4)"
                 />
