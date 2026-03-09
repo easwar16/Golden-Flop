@@ -92,8 +92,11 @@ export async function buildSPLDepositTransaction(
   network: 'devnet' | 'mainnet-beta' = SOLANA_NETWORK,
 ): Promise<Transaction> {
   // Dynamic import — avoids bundling the full spl-token library if not needed
-  const { getAssociatedTokenAddress, createTransferCheckedInstruction } =
-    await import('@solana/spl-token');
+  const {
+    getAssociatedTokenAddress,
+    createTransferCheckedInstruction,
+    createAssociatedTokenAccountIdempotentInstruction,
+  } = await import('@solana/spl-token');
 
   const info = await fetchTreasuryInfo();
   if (!info.seekerMint) throw new Error('Seeker mint not configured on server');
@@ -109,6 +112,16 @@ export async function buildSPLDepositTransaction(
 
   const { blockhash } = await connection.getLatestBlockhash('confirmed');
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: fromPubkey });
+
+  // Create the treasury's ATA if it doesn't exist yet (idempotent — no-op if it already exists)
+  tx.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      fromPubkey,     // payer
+      treasuryATA,
+      treasuryPubkey, // owner
+      mintPubkey,
+    ),
+  );
 
   tx.add(
     createTransferCheckedInstruction(
@@ -251,8 +264,11 @@ export async function buildSPLVaultBuyInTransaction(
   decimals: number = 9,
   network?: 'devnet' | 'mainnet-beta',
 ): Promise<Transaction> {
-  const { getAssociatedTokenAddress, createTransferCheckedInstruction } =
-    await import('@solana/spl-token');
+  const {
+    getAssociatedTokenAddress,
+    createTransferCheckedInstruction,
+    createAssociatedTokenAccountIdempotentInstruction,
+  } = await import('@solana/spl-token');
 
   const vaultInfo = await fetchVaultAddress(roomId);
   if (!vaultInfo.seekerMint) throw new Error('Seeker mint not configured on server');
@@ -267,6 +283,16 @@ export async function buildSPLVaultBuyInTransaction(
 
   const { blockhash } = await conn.getLatestBlockhash('confirmed');
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: fromPubkey });
+
+  // Create the vault's ATA if it doesn't exist yet (idempotent — no-op if it already exists)
+  tx.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      fromPubkey,   // payer
+      vaultATA,
+      vaultPubkey,  // owner
+      mintPubkey,
+    ),
+  );
 
   tx.add(
     createTransferCheckedInstruction(
