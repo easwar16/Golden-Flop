@@ -236,15 +236,37 @@ const ROOMS: RoomDef[] = [
  * Called automatically on server boot from app.ts.
  */
 export async function seedDatabase(): Promise<void> {
+  const vaultEnabled = isVaultConfigured();
   const roomCount = await prisma.room.count();
+
   if (roomCount >= ROOMS.length) {
-    console.log(`[seed] ${roomCount} rooms already exist — skipping seed`);
+    console.log(`[seed] ${roomCount} rooms already exist — checking vault addresses`);
+
+    // Backfill vault addresses for rooms that were seeded without a vault key
+    if (vaultEnabled) {
+      const roomsMissingVault = await prisma.room.findMany({
+        where: { vaultAddress: null, isPractice: false },
+        select: { id: true },
+      });
+
+      if (roomsMissingVault.length > 0) {
+        console.log(`[seed] backfilling vault addresses for ${roomsMissingVault.length} rooms...`);
+        for (const { id } of roomsMissingVault) {
+          try {
+            const vaultAddress = getOrCreateVaultAddress(id);
+            await prisma.room.update({ where: { id }, data: { vaultAddress } });
+          } catch {
+            // No vault key for this room
+          }
+        }
+        console.log('[seed] vault addresses backfilled');
+      }
+    }
+
     return;
   }
 
   console.log('[seed] seeding database...');
-
-  const vaultEnabled = isVaultConfigured();
 
   for (const room of ROOMS) {
     const tokenType = room.tokenMint === NATIVE_SOL_MINT ? 'SOL' : 'SEEKER';
