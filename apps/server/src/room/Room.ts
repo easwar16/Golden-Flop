@@ -942,9 +942,9 @@ export class Room {
           (p: RoomPlayer) => winners.some(w => w.playerId === p.id),
         );
         if (winnerSeatForRake?.userId) {
-          // SEEKER rake is in whole tokens; on-chain SPL needs smallest units (9 decimals)
+          // SEEKER rake is in whole tokens; on-chain SPL needs smallest units (6 decimals)
           const rakeOnChain = this.tokenType === 'SEEKER'
-            ? BigInt(rakeAmount) * 1_000_000_000n
+            ? BigInt(rakeAmount) * 1_000_000n
             : BigInt(rakeAmount);
           void processRakeTransfer(this.id, rakeOnChain, winnerSeatForRake.userId, this.tokenType);
         }

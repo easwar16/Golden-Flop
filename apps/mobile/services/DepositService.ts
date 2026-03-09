@@ -82,13 +82,13 @@ export async function buildSOLDepositTransaction(
  *
  * @param fromAddress  sender wallet (base58)
  * @param amount       token amount in smallest unit
- * @param decimals     token decimals (e.g. 9 for Seeker)
+ * @param decimals     token decimals (6 for Seeker)
  * @param network      devnet | mainnet-beta
  */
 export async function buildSPLDepositTransaction(
   fromAddress: string,
   amount: bigint,
-  decimals: number = 9,
+  decimals: number = 6,
   network: 'devnet' | 'mainnet-beta' = SOLANA_NETWORK,
 ): Promise<Transaction> {
   // Dynamic import — avoids bundling the full spl-token library if not needed
@@ -254,14 +254,14 @@ export async function buildVaultBuyInTransaction(
  * @param fromAddress  sender wallet (base58)
  * @param amount       token amount in smallest unit
  * @param roomId       room whose vault receives the deposit
- * @param decimals     token decimals (default 9)
+ * @param decimals     token decimals (6 for Seeker)
  * @param network      devnet | mainnet-beta (optional, fetched from server if omitted)
  */
 export async function buildSPLVaultBuyInTransaction(
   fromAddress: string,
   amount: bigint,
   roomId: string,
-  decimals: number = 9,
+  decimals: number = 6,
   network?: 'devnet' | 'mainnet-beta',
 ): Promise<Transaction> {
   const {

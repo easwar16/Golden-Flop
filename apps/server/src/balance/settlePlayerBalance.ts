@@ -32,10 +32,10 @@ export async function settlePlayerBalance(
 
   if (target.isVaultPlayer && target.walletAddress && target.userId) {
     try {
-      // SEEKER chips are whole tokens; on-chain SPL uses smallest units (9 decimals)
+      // SEEKER chips are whole tokens; on-chain SPL uses smallest units (6 decimals)
       const tokenType = target.tokenType ?? 'SOL';
       const onChainAmount = tokenType === 'SEEKER'
-        ? BigInt(target.chips) * 1_000_000_000n
+        ? BigInt(target.chips) * 1_000_000n
         : BigInt(target.chips);
 
       const sig = await processPlayerCashOut(

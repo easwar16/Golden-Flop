@@ -151,7 +151,7 @@ export async function transferSPLFromVault(
   destination: string,
   amount: bigint,
   mint: string,
-  decimals: number = 9,
+  decimals: number = 6,
 ): Promise<string> {
   const {
     getAssociatedTokenAddress,

@@ -257,9 +257,9 @@ export function registerSocketHandlers(
             // Already processed — allow re-seating with this deposit
           } else {
             // Verify on-chain — branch by token type
-            // SEEKER amounts in payload are whole tokens; on-chain uses smallest units (9 decimals)
+            // SEEKER amounts in payload are whole tokens; on-chain uses smallest units (6 decimals)
             const expectedOnChain = roomTokenType === 'SEEKER'
-              ? BigInt(payload.buyIn) * 1_000_000_000n
+              ? BigInt(payload.buyIn) * 1_000_000n
               : BigInt(payload.buyIn);
 
             const verification = roomTokenType === 'SEEKER'
