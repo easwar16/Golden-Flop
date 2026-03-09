@@ -729,7 +729,7 @@ export default function LobbyScreen() {
           const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
           const seekerMintStr = seekerTables.length > 0
             ? await (async () => {
-                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:4010'}/api/vault/${seekerTables[0].id}/address`);
+                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL ?? 'https://api.gldnflp.easwar.me'}/api/vault/${seekerTables[0].id}/address`);
                 if (!res.ok) return null;
                 const data = await res.json() as { seekerMint?: string };
                 return data.seekerMint ?? null;
