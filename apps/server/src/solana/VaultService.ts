@@ -65,7 +65,9 @@ export function getVaultKeypair(roomId: string): Keypair {
 
   // Per-room key takes priority
   const perRoomKey = process.env[`VAULT_KEY_${roomIdToEnvKey(roomId)}`];
+  console.log('perRoomKey', perRoomKey);
   const sharedKey = process.env.VAULT_PRIVATE_KEY;
+  console.log('sharedKey', sharedKey);
   const secretKeyBase58 = perRoomKey ?? sharedKey;
 
   if (!secretKeyBase58) {

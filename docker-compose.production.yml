@@ -40,18 +40,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    env_file:
+      - .env.goldenflop.production
     environment:
       - NODE_ENV=production
-      - PORT=${PORT:-4010}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
-      - SOLANA_NETWORK=${SOLANA_NETWORK}
-      - TREASURY_WALLET=${TREASURY_WALLET}
-      - SEEKER_MINT=${SEEKER_MINT}
-      - VAULT_PRIVATE_KEY=${VAULT_PRIVATE_KEY}
-      - CORS_ORIGIN=${CORS_ORIGIN}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-4010}/health"]
       interval: 30s
