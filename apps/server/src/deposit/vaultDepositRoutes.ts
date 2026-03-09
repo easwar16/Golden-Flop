@@ -97,10 +97,10 @@ router.post('/:roomId/verify-buy-in', requireAuth, async (req: Request, res: Res
 
   const roomTokenType = (room.tokenType as 'SOL' | 'SEEKER') ?? 'SOL';
 
-  // SEEKER amounts may arrive as whole tokens; on-chain uses smallest units (9 decimals)
+  // SEEKER amounts may arrive as whole tokens; on-chain uses smallest units (6 decimals)
   const rawAmount = BigInt(expectedAmountLamports);
   const expectedAmount = roomTokenType === 'SEEKER'
-    ? rawAmount * 1_000_000_000n
+    ? rawAmount * 1_000_000n
     : rawAmount;
 
   // ── Idempotency check ─────────────────────────────────────────────────────

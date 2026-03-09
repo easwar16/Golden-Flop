@@ -739,7 +739,7 @@ export default function LobbyScreen() {
             const mintPubkey = new PublicKey(seekerMintStr);
             const ata = await getAssociatedTokenAddress(mintPubkey, pubkey);
             const account = await getAccount(connection, ata);
-            const amount = Number(account.amount) / 1_000_000_000;
+            const amount = Number(account.amount) / 1_000_000;
             if (!cancelled) setSeekerBalance(amount >= 1000 ? `${(amount / 1000).toFixed(1)}K SEEKER` : `${amount.toFixed(0)} SEEKER`);
           }
         } catch {

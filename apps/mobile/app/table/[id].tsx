@@ -592,7 +592,7 @@ const BuyInModal = memo(function BuyInModal({
       // 2. Build and sign the wallet transaction
       const walletAddress = new PublicKey(accounts[0].address).toBase58();
       const tx = isSeeker
-        ? await buildSPLVaultBuyInTransaction(walletAddress, BigInt(buyIn) * 1_000_000_000n, tableId, 9, SOLANA_NETWORK)
+        ? await buildSPLVaultBuyInTransaction(walletAddress, BigInt(buyIn) * 1_000_000n, tableId, 6, SOLANA_NETWORK)
         : await buildVaultBuyInTransaction(walletAddress, buyIn, tableId, SOLANA_NETWORK);
       const txSignature = await signAndSendTransaction(tx);
       // Reservation will be consumed by sit_at_seat — don't release on close
