@@ -71,9 +71,12 @@ jobs:
             cd ~/goldenflop
             echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
-            rm -f .env.goldenflop.production
+            # Write core env vars (overwrites the top section, preserves manually-added VAULT_KEY_* lines)
+            # 1. Save any existing VAULT_KEY_* lines
+            grep '^VAULT_KEY_' .env.goldenflop.production > /tmp/vault_keys.tmp 2>/dev/null || true
 
-            cat <<EOF > .env.goldenflop.production
+            # 2. Write fresh env file
+            cat <<'ENVEOF' > .env.goldenflop.production
             DOCKERHUB_IMAGE_PREFIX=${{ secrets.DOCKERHUB_USERNAME }}/goldenflop
             IMAGE_TAG=${{ github.sha }}
             PORT=4010
@@ -87,7 +90,18 @@ jobs:
             SEEKER_MINT=${{ secrets.SEEKER_MINT }}
             VAULT_PRIVATE_KEY=${{ secrets.VAULT_PRIVATE_KEY }}
             CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
-            EOF
+            VAULT_KEY_TABLE_HIGH_A_1=${{ secrets.VAULT_KEY_TABLE_HIGH_A_1 }}
+            VAULT_KEY_TABLE_HIGH_A_2=${{ secrets.VAULT_KEY_TABLE_HIGH_A_2 }}
+            VAULT_KEY_TABLE_HIGH_A_3=${{ secrets.VAULT_KEY_TABLE_HIGH_A_3 }}
+            VAULT_KEY_TABLE_MICRO_A_1=${{ secrets.VAULT_KEY_TABLE_MICRO_A_1 }}
+            ENVEOF
+
+            # 3. Strip leading whitespace from heredoc indentation
+            sed -i 's/^[[:space:]]*//' .env.goldenflop.production
+
+            # 4. Re-append per-room vault keys
+            cat /tmp/vault_keys.tmp >> .env.goldenflop.production 2>/dev/null || true
+            rm -f /tmp/vault_keys.tmp
 
             docker compose -f docker-compose.production.yml --env-file .env.goldenflop.production pull
             docker compose -f docker-compose.production.yml --env-file .env.goldenflop.production up -d --remove-orphans

@@ -2,7 +2,7 @@
   "expo": {
     "name": "GoldenFlop",
     "slug": "goldenflop",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "owner": "goldenflop.skr",
     "extra": {
       "eas": {
@@ -27,6 +27,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
+      "versionCode": 2,
       "package": "com.goldenflop.skr.goldenflop"
     },
     "web": {

@@ -14,6 +14,7 @@ import { requireAuth, type AuthRequest } from '../auth/jwtMiddleware';
 import { verifySOLDepositToVault, verifySPLDepositToVault } from '../solana/SolanaService';
 import { creditBalance } from '../balance/BalanceService';
 import { generalLimiter } from '../middleware/rateLimiter';
+import { getOrCreateVaultAddress, isVaultConfigured } from '../solana/VaultService';
 
 const router = Router();
 router.use(generalLimiter);
@@ -34,13 +35,30 @@ router.get('/:roomId/address', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!room.vaultAddress) {
+    let vaultAddress = room.vaultAddress;
+
+    // If the vault address is missing in the DB but a vault key is configured,
+    // derive it on-the-fly and persist it so this only happens once.
+    if (!vaultAddress && isVaultConfigured()) {
+      try {
+        vaultAddress = getOrCreateVaultAddress(roomId);
+        await prisma.room.update({
+          where: { id: roomId },
+          data: { vaultAddress },
+        });
+        console.log(`[vaultDepositRoutes] Backfilled vault address for room ${roomId}`);
+      } catch {
+        // No vault key for this specific room
+      }
+    }
+
+    if (!vaultAddress) {
       res.status(404).json({ error: 'Room does not have a vault configured' });
       return;
     }
 
     res.json({
-      vault: room.vaultAddress,
+      vault: vaultAddress,
       network: process.env.SOLANA_NETWORK ?? 'devnet',
       tokenType: room.tokenType,
       seekerMint: process.env.SEEKER_MINT ?? null,
